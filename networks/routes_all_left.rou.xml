@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<routes>
+    <!-- All vehicles turn left through the junction -->
+    <!-- Left turn mapping: T->R, D->L, L->T, R->D -->
+
+    <!-- Routes -->
+    <route id="T_left" edges="E#T-X E#X-R"/>
+    <route id="D_left" edges="E#D-X E#X-L"/>
+    <route id="L_left" edges="E#L-X E#X-T"/>
+    <route id="R_left" edges="E#R-X E#X-D"/>
+
+    <!-- Flows -->
+    <flow id="flow_T" route="T_left" begin="0" end="3600" probability="0.1" departSpeed="max"/>
+    <flow id="flow_D" route="D_left" begin="0" end="3600" probability="0.1" departSpeed="max"/>
+    <flow id="flow_L" route="L_left" begin="0" end="3600" probability="0.1" departSpeed="max"/>
+    <flow id="flow_R" route="R_left" begin="0" end="3600" probability="0.1" departSpeed="max"/>
+</routes>

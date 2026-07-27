@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<routes>
+    <!-- All vehicles go straight through the junction -->
+
+    <!-- Routes -->
+    <route id="T_straight" edges="E#T-X E#X-D"/>
+    <route id="D_straight" edges="E#D-X E#X-T"/>
+    <route id="L_straight" edges="E#L-X E#X-R"/>
+    <route id="R_straight" edges="E#R-X E#X-L"/>
+
+    <!-- Flows: fixed spawn probability (vehs/s via probability attribute) -->
+    <flow id="flow_T" route="T_straight" begin="0" end="3600" probability="0.1" departSpeed="max"/>
+    <flow id="flow_D" route="D_straight" begin="0" end="3600" probability="0.1" departSpeed="max"/>
+    <flow id="flow_L" route="L_straight" begin="0" end="3600" probability="0.1" departSpeed="max"/>
+    <flow id="flow_R" route="R_straight" begin="0" end="3600" probability="0.1" departSpeed="max"/>
+</routes>

@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<routes>
+    <!-- Uniform random: equal 1/3 chance of straight, left, or right -->
+    <!-- Straight: T->D, D->T, L->R, R->L                           -->
+    <!-- Left:     T->R, D->L, L->T, R->D                           -->
+    <!-- Right:    T->L, D->R, L->D, R->T                           -->
+
+    <!-- Route distributions with edges defined inline -->
+    <routeDistribution id="dist_T">
+        <route id="T_straight" edges="E#T-X E#X-D" probability="0.333"/>
+        <route id="T_left"     edges="E#T-X E#X-R" probability="0.333"/>
+        <route id="T_right"    edges="E#T-X E#X-L" probability="0.333"/>
+    </routeDistribution>
+    <routeDistribution id="dist_D">
+        <route id="D_straight" edges="E#D-X E#X-T" probability="0.333"/>
+        <route id="D_left"     edges="E#D-X E#X-L" probability="0.333"/>
+        <route id="D_right"    edges="E#D-X E#X-R" probability="0.333"/>
+    </routeDistribution>
+    <routeDistribution id="dist_L">
+        <route id="L_straight" edges="E#L-X E#X-R" probability="0.333"/>
+        <route id="L_left"     edges="E#L-X E#X-T" probability="0.333"/>
+        <route id="L_right"    edges="E#L-X E#X-D" probability="0.333"/>
+    </routeDistribution>
+    <routeDistribution id="dist_R">
+        <route id="R_straight" edges="E#R-X E#X-L" probability="0.333"/>
+        <route id="R_left"     edges="E#R-X E#X-D" probability="0.333"/>
+        <route id="R_right"    edges="E#R-X E#X-T" probability="0.333"/>
+    </routeDistribution>
+
+    <!-- Flows using route distributions -->
+    <flow id="flow_T" route="dist_T" begin="0" end="3600" probability="0.1" departSpeed="max"/>
+    <flow id="flow_D" route="dist_D" begin="0" end="3600" probability="0.1" departSpeed="max"/>
+    <flow id="flow_L" route="dist_L" begin="0" end="3600" probability="0.1" departSpeed="max"/>
+    <flow id="flow_R" route="dist_R" begin="0" end="3600" probability="0.1" departSpeed="max"/>
+</routes>

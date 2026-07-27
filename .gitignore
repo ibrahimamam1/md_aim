@@ -1,0 +1,8 @@
+~/
+results/
+outputs/
+output/
+plots/
+plots_ft/
+checkpoints/
+tensorboard_logs/
