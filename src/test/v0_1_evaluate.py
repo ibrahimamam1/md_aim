@@ -287,6 +287,8 @@ def main():
                             done = dones[0]
                             info = infos[0]
 
+                        telemetry = info.get("telemetry") or {}
+
                         def _fmt_profile(arr):
                             return ";".join(f"{float(x):.4f}" for x in arr)
 
