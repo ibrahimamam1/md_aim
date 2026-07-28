@@ -40,7 +40,9 @@ parser = argparse.ArgumentParser(description="Evaluate trained v0.1 agent.")
 parser.add_argument("--checkpoint", required=True, help="Path to checkpoint (without .zip).")
 parser.add_argument("--version", required=True,
                     choices=["heuristic_continous", "heuristic_discrete",
+                             "heuristic_discrete_3", "heuristic_discrete_5", "heuristic_discrete_10",
                              "attention_continous", "attention_discrete",
+                             "attention_discrete_3", "attention_discrete_5", "attention_discrete_10",
                              "heuristic_attention_continous", "heuristic_attention_discrete"])
 parser.add_argument("--n_sims", type=int, default=42, help="Runs per scenario combo.")
 parser.add_argument("--render", action="store_true", default=False)
@@ -106,12 +108,30 @@ def _get_env_class(version):
     elif version == "heuristic_discrete":
         from envs.alpha_env_v01_discrete import AlphaEnv_v01_Discrete
         return AlphaEnv_v01_Discrete
+    elif version == "heuristic_discrete_3":
+        from envs.alpha_env_v01_discrete import AlphaEnv_v01_Discrete_3
+        return AlphaEnv_v01_Discrete_3
+    elif version == "heuristic_discrete_5":
+        from envs.alpha_env_v01_discrete import AlphaEnv_v01_Discrete_5
+        return AlphaEnv_v01_Discrete_5
+    elif version == "heuristic_discrete_10":
+        from envs.alpha_env_v01_discrete import AlphaEnv_v01_Discrete_10
+        return AlphaEnv_v01_Discrete_10
     elif version == "attention_continous":
         from envs.alpha_env_v01_attention_continous import AlphaEnv_v01_Attention
         return AlphaEnv_v01_Attention
     elif version == "attention_discrete":
         from envs.alpha_env_v01_attention_discrete import AlphaEnv_v01_AttentionDiscrete
         return AlphaEnv_v01_AttentionDiscrete
+    elif version == "attention_discrete_3":
+        from envs.alpha_env_v01_attention_discrete import AlphaEnv_v01_AttentionDiscrete_3
+        return AlphaEnv_v01_AttentionDiscrete_3
+    elif version == "attention_discrete_5":
+        from envs.alpha_env_v01_attention_discrete import AlphaEnv_v01_AttentionDiscrete_5
+        return AlphaEnv_v01_AttentionDiscrete_5
+    elif version == "attention_discrete_10":
+        from envs.alpha_env_v01_attention_discrete import AlphaEnv_v01_AttentionDiscrete_10
+        return AlphaEnv_v01_AttentionDiscrete_10
     elif version == "heuristic_attention_continous":
         from envs.alpha_env_v01_heuristic_attention_continous import AlphaEnv_v01_HeuristicAttention
         return AlphaEnv_v01_HeuristicAttention

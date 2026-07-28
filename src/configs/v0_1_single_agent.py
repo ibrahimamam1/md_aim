@@ -9,8 +9,12 @@ group = parser.add_mutually_exclusive_group(required=True)
 group.add_argument("--train", action="store_true", help="Run training loop.")
 group.add_argument("--eval",  metavar="CHECKPOINT_PATH",
                    help="Path to a checkpoint zip file to load and evaluate.")
-parser.add_argument("--version", choices=["heuristic_discrete", "heuristic_continuous", "attention_discrete", "attention_continous"],
-                    default="heuristic_discrete", help="Environment version to use.")
+parser.add_argument("--version", choices=[
+    "heuristic_discrete", "heuristic_discrete_3", "heuristic_discrete_5", "heuristic_discrete_10",
+    "heuristic_continuous",
+    "attention_discrete", "attention_discrete_3", "attention_discrete_5", "attention_discrete_10",
+    "attention_continous"
+], default="heuristic_discrete", help="Environment version to use.")
 args = parser.parse_args()
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
@@ -32,7 +36,7 @@ from stable_baselines3.common.monitor import Monitor
 IDM_acceleration_controller = IDMController
 RL_vehicle_acceleration_controller = RLController
 
-myTag = "AlphaV0.1_Heuristic_Discrete"
+myTag = f"AlphaV0.1_{args.version}"
 min_gap       = 2.5
 max_accel     = 2.6
 max_decel     = 4.5
@@ -162,10 +166,24 @@ def create_flow_env(env_config):
         from src.envs.alpha_env_v01 import AlphaEnv_v01 as EnvClass
     elif args.version == "heuristic_discrete":
         from src.envs.alpha_env_v01_discrete import AlphaEnv_v01_Discrete as EnvClass
+    elif args.version == "heuristic_discrete_3":
+        from src.envs.alpha_env_v01_discrete import AlphaEnv_v01_Discrete_3 as EnvClass
+    elif args.version == "heuristic_discrete_5":
+        from src.envs.alpha_env_v01_discrete import AlphaEnv_v01_Discrete_5 as EnvClass
+    elif args.version == "heuristic_discrete_10":
+        from src.envs.alpha_env_v01_discrete import AlphaEnv_v01_Discrete_10 as EnvClass
     elif args.version == "attention_discrete":
         from src.envs.alpha_env_v01_attention_discrete import AlphaEnv_v01_AttentionDiscrete as EnvClass
+    elif args.version == "attention_discrete_3":
+        from src.envs.alpha_env_v01_attention_discrete import AlphaEnv_v01_AttentionDiscrete_3 as EnvClass
+    elif args.version == "attention_discrete_5":
+        from src.envs.alpha_env_v01_attention_discrete import AlphaEnv_v01_AttentionDiscrete_5 as EnvClass
+    elif args.version == "attention_discrete_10":
+        from src.envs.alpha_env_v01_attention_discrete import AlphaEnv_v01_AttentionDiscrete_10 as EnvClass
     elif args.version == "attention_continous":
         from src.envs.alpha_env_v01_attention_continous import AlphaEnv_v01_Attention as EnvClass
+    else:
+        raise ValueError(f"Unknown environment version: {args.version}")
 
     params       = flow_params
     _vehicles    = deepcopy(params["veh"])

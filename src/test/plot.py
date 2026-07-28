@@ -95,8 +95,14 @@ SCENARIO_LABELS = {
 CONTROLLERS = {
     "heuristic_attention_discrete":  "Heuristic+Attention + Discrete",
     "heuristic_attention_continous": "Heuristic+Attention + Continuous",
+    "heuristic_discrete_10":         "Heuristic + Discrete (10)",
+    "heuristic_discrete_5":          "Heuristic + Discrete (5)",
+    "heuristic_discrete_3":          "Heuristic + Discrete (3)",
     "heuristic_discrete":            "Heuristic + Discrete",
     "heuristic_continous":           "Heuristic + Continuous",
+    "attention_discrete_10":         "Attention + Discrete (10)",
+    "attention_discrete_5":          "Attention + Discrete (5)",
+    "attention_discrete_3":          "Attention + Discrete (3)",
     "attention_discrete":            "Attention + Discrete",
     "attention_continous":           "Attention + Continuous",
 }
@@ -115,8 +121,14 @@ INTENTIONS = {
 # ---------------------------------------------------------------------------
 CONTROLLER_COLORS = {
     "heuristic_discrete":            "#1f77b4",   # muted blue
+    "heuristic_discrete_3":          "#6baed6",   # light blue
+    "heuristic_discrete_5":          "#1f77b4",   # muted blue
+    "heuristic_discrete_10":         "#08519c",   # dark blue
     "heuristic_continous":           "#d62728",   # brick red
     "attention_discrete":            "#2ca02c",   # green
+    "attention_discrete_3":          "#74c476",   # light green
+    "attention_discrete_5":          "#2ca02c",   # green
+    "attention_discrete_10":         "#006d2c",   # dark green
     "attention_continous":           "#9467bd",   # purple
     "heuristic_attention_discrete":  "#17becf",   # cyan/teal
     "heuristic_attention_continous": "#8c564b",   # brown/burgundy
@@ -124,8 +136,14 @@ CONTROLLER_COLORS = {
 
 CONTROLLER_MARKERS = {
     "heuristic_discrete":            "o",
+    "heuristic_discrete_3":          "o",
+    "heuristic_discrete_5":          "o",
+    "heuristic_discrete_10":         "o",
     "heuristic_continous":           "s",
     "attention_discrete":            "^",
+    "attention_discrete_3":          "^",
+    "attention_discrete_5":          "^",
+    "attention_discrete_10":         "^",
     "attention_continous":           "D",
     "heuristic_attention_discrete":  "v",
     "heuristic_attention_continous": "P",
@@ -133,8 +151,14 @@ CONTROLLER_MARKERS = {
 
 CONTROLLER_LINESTYLES = {
     "heuristic_discrete":            "-",
+    "heuristic_discrete_3":          "-",
+    "heuristic_discrete_5":          "-",
+    "heuristic_discrete_10":         "-",
     "heuristic_continous":           "--",
     "attention_discrete":            "-.",
+    "attention_discrete_3":          "-.",
+    "attention_discrete_5":          "-.",
+    "attention_discrete_10":         "-.",
     "attention_continous":           ":",
     "heuristic_attention_discrete":  "-",
     "heuristic_attention_continous": "--",

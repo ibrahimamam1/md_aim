@@ -85,3 +85,25 @@ class AlphaEnv_v01_AttentionDiscrete(AlphaEnv_v01_Attention):
             + 1.0 * safety_penalty     # Penalty for crossing intersection unsafely
             - 0.01                     # Time penalty
         )
+
+
+class AlphaEnv_v01_AttentionDiscrete_3(AlphaEnv_v01_AttentionDiscrete):
+    """
+    Attention + Discrete action space with 3 bins: [-1.0, 0.0, 1.0]
+    """
+    ACCEL_BINS = [-1.0, 0.0, 1.0]
+
+
+class AlphaEnv_v01_AttentionDiscrete_5(AlphaEnv_v01_AttentionDiscrete):
+    """
+    Attention + Discrete action space with 5 bins: [-1.0, -0.5, 0.0, 0.5, 1.0]
+    """
+    ACCEL_BINS = [-1.0, -0.5, 0.0, 0.5, 1.0]
+
+
+class AlphaEnv_v01_AttentionDiscrete_10(AlphaEnv_v01_AttentionDiscrete):
+    """
+    Attention + Discrete action space with 10 bins evenly spaced between -1.0 and 1.0
+    """
+    ACCEL_BINS = [float(np.round(x, 4)) for x in np.linspace(-1.0, 1.0, 10)]
+
