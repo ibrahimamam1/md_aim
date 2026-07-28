@@ -93,10 +93,12 @@ SCENARIO_LABELS = {
 
 # Controllers present in the filenames
 CONTROLLERS = {
-    "heuristic_discrete":   "Heuristic + Discrete",
-    "heuristic_continous":  "Heuristic + Continuous",
-    "attention_discrete":   "Attention + Discrete",
-    "attention_continous":  "Attention + Continuous",
+    "heuristic_attention_discrete":  "Heuristic+Attention + Discrete",
+    "heuristic_attention_continous": "Heuristic+Attention + Continuous",
+    "heuristic_discrete":            "Heuristic + Discrete",
+    "heuristic_continous":           "Heuristic + Continuous",
+    "attention_discrete":            "Attention + Discrete",
+    "attention_continous":           "Attention + Continuous",
 }
 
 # Intentions present in the filenames
@@ -105,30 +107,37 @@ INTENTIONS = {
     "all_left":          "All Left",
     "uniform_random":    "Uniform Random",
     "asymetric_random":  "Asymmetric Random",
+    "asymmetric_random": "Asymmetric Random",
 }
 
 # ---------------------------------------------------------------------------
 # Academic colour / style palette
 # ---------------------------------------------------------------------------
 CONTROLLER_COLORS = {
-    "heuristic_discrete":  "#1f77b4",   # muted blue
-    "heuristic_continous": "#d62728",   # brick red
-    "attention_discrete":  "#2ca02c",   # green
-    "attention_continous": "#9467bd",   # purple
+    "heuristic_discrete":            "#1f77b4",   # muted blue
+    "heuristic_continous":           "#d62728",   # brick red
+    "attention_discrete":            "#2ca02c",   # green
+    "attention_continous":           "#9467bd",   # purple
+    "heuristic_attention_discrete":  "#17becf",   # cyan/teal
+    "heuristic_attention_continous": "#8c564b",   # brown/burgundy
 }
 
 CONTROLLER_MARKERS = {
-    "heuristic_discrete":  "o",
-    "heuristic_continous": "s",
-    "attention_discrete":  "^",
-    "attention_continous": "D",
+    "heuristic_discrete":            "o",
+    "heuristic_continous":           "s",
+    "attention_discrete":            "^",
+    "attention_continous":           "D",
+    "heuristic_attention_discrete":  "v",
+    "heuristic_attention_continous": "P",
 }
 
 CONTROLLER_LINESTYLES = {
-    "heuristic_discrete":  "-",
-    "heuristic_continous": "--",
-    "attention_discrete":  "-.",
-    "attention_continous": ":",
+    "heuristic_discrete":            "-",
+    "heuristic_continous":           "--",
+    "attention_discrete":            "-.",
+    "attention_continous":           ":",
+    "heuristic_attention_discrete":  "-",
+    "heuristic_attention_continous": "--",
 }
 
 # ---------------------------------------------------------------------------
@@ -263,6 +272,156 @@ def load_data(data_dir: str) -> pd.DataFrame:
         f"controllers: {sorted(df_all['controller'].unique())}"
     )
     return df_all
+
+
+def parse_profile_str(val: str) -> np.ndarray:
+    if not val or pd.isna(val):
+        return np.array([], dtype=float)
+    val = str(val).strip()
+    if not val:
+        return np.array([], dtype=float)
+    if val.startswith("[") and val.endswith("]"):
+        import json
+        try:
+            return np.array(json.loads(val), dtype=float)
+        except Exception:
+            pass
+    for sep in [";", ",", " "]:
+        if sep in val:
+            try:
+                return np.array([float(x) for x in val.split(sep) if x.strip()], dtype=float)
+            except Exception:
+                continue
+    try:
+        return np.array([float(val)], dtype=float)
+    except Exception:
+        return np.array([], dtype=float)
+
+
+def load_profiles(data_dir: str) -> dict:
+    """
+    Load profile telemetry (times, distances, velocities, jerks) from CSV files in *data_dir*,
+    grouped by controller.
+    """
+    csv_files = glob(os.path.join(data_dir, "*.csv"))
+    profiles = {ctrl: {"times": [], "distances": [], "velocities": [], "jerks": [], "accelerations": []} for ctrl in CONTROLLERS}
+
+    for path in csv_files:
+        meta = parse_filename(path)
+        if meta is None or meta["controller"] not in profiles:
+            continue
+        ctrl = meta["controller"]
+        try:
+            df = pd.read_csv(path)
+        except Exception:
+            continue
+
+        for _, row in df.iterrows():
+            t_arr = parse_profile_str(row.get("time_profile", ""))
+            d_arr = parse_profile_str(row.get("distance_profile", ""))
+            v_arr = parse_profile_str(row.get("velocity_profile", ""))
+            j_arr = parse_profile_str(row.get("jerk_profile", ""))
+            a_arr = parse_profile_str(row.get("acceleration_profile", ""))
+
+            if len(t_arr) > 0 and len(v_arr) == len(t_arr):
+                profiles[ctrl]["times"].extend(t_arr)
+                profiles[ctrl]["velocities"].extend(v_arr)
+            if len(d_arr) > 0 and len(v_arr) == len(d_arr):
+                profiles[ctrl]["distances"].extend(d_arr)
+            if len(t_arr) > 0 and len(j_arr) == len(t_arr):
+                profiles[ctrl]["jerks"].extend(j_arr)
+            if len(t_arr) > 0 and len(a_arr) == len(t_arr):
+                profiles[ctrl]["accelerations"].extend(a_arr)
+
+    return profiles
+
+
+def plot_profile_scatters(profiles: dict, output_dir: str):
+    """
+    Plot academic-quality scatter plots of velocity profile with time, velocity profile with distance,
+    and jerk profile with time across various controllers.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    controllers = [c for c in CONTROLLERS.keys() if c in profiles and any(len(profiles[c][k]) > 0 for k in profiles[c])]
+
+    def _draw_scatter(ax, x_key, y_key, xlabel, ylabel, title, max_pts=2500):
+        has_data = False
+        for c in controllers:
+            x_data = np.asarray(profiles[c].get(x_key, []), dtype=float)
+            y_data = np.asarray(profiles[c].get(y_key, []), dtype=float)
+            if len(x_data) == 0 or len(y_data) == 0 or len(x_data) != len(y_data):
+                continue
+            valid = np.isfinite(x_data) & np.isfinite(y_data)
+            x_data, y_data = x_data[valid], y_data[valid]
+            if len(x_data) == 0:
+                continue
+            has_data = True
+            color = CONTROLLER_COLORS.get(c, "#333333")
+            label = CONTROLLERS.get(c, c)
+            if len(x_data) > max_pts:
+                idx = np.random.choice(len(x_data), size=max_pts, replace=False)
+                x_sc, y_sc = x_data[idx], y_data[idx]
+            else:
+                x_sc, y_sc = x_data, y_data
+            ax.scatter(x_sc, y_sc, color=color, alpha=0.35, s=12, edgecolors="none", label=label, zorder=2)
+
+            x_min, x_max = np.min(x_data), np.max(x_data)
+            if x_max > x_min:
+                n_bins = min(40, max(10, int(np.sqrt(len(x_data)))))
+                bins = np.linspace(x_min, x_max, n_bins + 1)
+                bin_centers = 0.5 * (bins[:-1] + bins[1:])
+                bin_means = []
+                valid_centers = []
+                for b_idx in range(n_bins):
+                    in_bin = (x_data >= bins[b_idx]) & (x_data < bins[b_idx + 1])
+                    if b_idx == n_bins - 1:
+                        in_bin = (x_data >= bins[b_idx]) & (x_data <= bins[b_idx + 1])
+                    if np.any(in_bin):
+                        bin_means.append(np.mean(y_data[in_bin]))
+                        valid_centers.append(bin_centers[b_idx])
+                if len(valid_centers) > 1:
+                    ax.plot(valid_centers, bin_means, color=color, linewidth=2.2, linestyle="-", zorder=4)
+
+        ax.set_xlabel(xlabel, fontsize=11)
+        ax.set_ylabel(ylabel, fontsize=11)
+        ax.set_title(title, fontsize=13, fontweight="bold", pad=10)
+        ax.grid(True, linestyle="--", alpha=0.35, zorder=0)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        if not has_data:
+            ax.text(0.5, 0.5, "No profile telemetry found\n(Re-run evaluation to record profiles)",
+                    ha="center", va="center", transform=ax.transAxes, fontsize=10, color="gray", style="italic")
+
+    # 1. Individual figures
+    configs = [
+        ("times", "velocities", "Time (s)", "Velocity (m/s)", "Velocity Profile vs. Time", "fig5_velocity_vs_time_scatter"),
+        ("distances", "velocities", "Distance (m)", "Velocity (m/s)", "Velocity Profile vs. Distance", "fig6_velocity_vs_distance_scatter"),
+        ("times", "jerks", "Time (s)", "Jerk (m/s³)", "Jerk Profile vs. Time", "fig7_jerk_vs_time_scatter"),
+    ]
+    for x_key, y_key, xlabel, ylabel, title, fname in configs:
+        fig, ax = plt.subplots(1, 1, figsize=(7, 5))
+        _draw_scatter(ax, x_key, y_key, xlabel, ylabel, title)
+        handles = [mpatches.Patch(color=CONTROLLER_COLORS[c], alpha=0.88, label=CONTROLLERS[c]) for c in controllers if c in CONTROLLER_COLORS]
+        if handles:
+            ax.legend(handles=handles, loc="best", frameon=False, fontsize=9)
+        fig.tight_layout()
+        for ext in ["png", "pdf"]:
+            fig.savefig(os.path.join(output_dir, f"{fname}.{ext}"), dpi=300, bbox_inches="tight")
+        plt.close(fig)
+        print(f"  -> Saved {fname}.png/.pdf")
+
+    # 2. Combined 1x3 panel figure
+    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+    for ax, (x_key, y_key, xlabel, ylabel, title, _) in zip(axes, configs):
+        _draw_scatter(ax, x_key, y_key, xlabel, ylabel, title)
+    handles = [mpatches.Patch(color=CONTROLLER_COLORS[c], alpha=0.88, label=CONTROLLERS[c]) for c in controllers if c in CONTROLLER_COLORS]
+    if handles:
+        fig.legend(handles=handles, loc="lower center", ncol=min(max(1, len(handles)), 3), frameon=False, fontsize=10, bbox_to_anchor=(0.5, -0.08))
+    fig.tight_layout()
+    for ext in ["png", "pdf"]:
+        fig.savefig(os.path.join(output_dir, f"fig8_all_profiles_scatter.{ext}"), dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    print("  -> Saved fig8_all_profiles_scatter.png/.pdf")
 
 
 # ---------------------------------------------------------------------------
@@ -495,6 +654,11 @@ def main():
     # ── Fig 4 — Travel time heatmap ──────────────────────────────────────────
     print("[Fig 4] Travel-time heatmap …")
     plot_heatmap(df, "travel_time_mean", output_dir)
+
+    # ── Fig 5-8 — Profile scatter plots ──────────────────────────────────────
+    print("\n[Fig 5-8] Velocity & Jerk profile scatter plots …")
+    profiles = load_profiles(results_dir)
+    plot_profile_scatters(profiles, output_dir)
 
     print(f"\nDone! All figures saved to: {output_dir}")
 

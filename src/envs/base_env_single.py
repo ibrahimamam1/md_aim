@@ -174,6 +174,9 @@ class Env_N(gym.Env, metaclass=ABCMeta):
             # --- Agent-only telemetry ---
             "agent_speeds": [],          # List of speeds for every step agent is alive
             "agent_accelerations": [],   # List of accels for every step agent is alive
+            "agent_times": [],           # List of times since spawn for every step agent is alive
+            "agent_distances": [],       # List of cumulative distance for every step agent is alive
+            "agent_jerks": [],           # List of jerk values for every step agent is alive
             "agent_waiting_time": 0.0,   # Accumulated time agent speed < 0.1
             "agent_spawn_time": None,    # Time step agent first appeared
             "agent_finish_time": None,   # Time step agent left (success or crash)
@@ -205,18 +208,29 @@ class Env_N(gym.Env, metaclass=ABCMeta):
             # 2. Get Agent Physics
             speed = self.k.vehicle.get_speed(self.agent_id)
             accel = self.k.vehicle.get_accel(self.agent_id)
+            if speed is None:
+                speed = 0.0
+            if accel is None:
+                accel = 0.0
             
             # 3. Update Stats
-            if speed is not None:
-                self.telemetry["agent_speeds"].append(speed)
-                # Track waiting time (speed < 0.1 m/s)
-                if speed < 0.1:
-                    self.telemetry["agent_waiting_time"] += self.sim_step
-                # Track distance (Speed * Time)
-                self.telemetry["agent_total_distance"] += speed * self.sim_step
+            self.telemetry["agent_speeds"].append(float(speed))
+            if speed < 0.1:
+                self.telemetry["agent_waiting_time"] += self.sim_step
+            self.telemetry["agent_total_distance"] += speed * self.sim_step
+            self.telemetry["agent_distances"].append(float(self.telemetry["agent_total_distance"]))
 
-            if accel is not None:
-                self.telemetry["agent_accelerations"].append(accel)
+            rel_time = current_time - self.telemetry["agent_spawn_time"] if self.telemetry["agent_spawn_time"] is not None else 0.0
+            self.telemetry["agent_times"].append(float(rel_time))
+
+            if len(self.telemetry["agent_accelerations"]) > 0:
+                prev_accel = self.telemetry["agent_accelerations"][-1]
+                jerk = (accel - prev_accel) / max(self.sim_step, 1e-5)
+            else:
+                jerk = 0.0
+
+            self.telemetry["agent_accelerations"].append(float(accel))
+            self.telemetry["agent_jerks"].append(float(jerk))
 
         # 4. Check Collisions specifically for this agent
         colliding_ids = self.k.kernel_api.simulation.getCollidingVehiclesIDList()
@@ -252,6 +266,11 @@ class Env_N(gym.Env, metaclass=ABCMeta):
             "agent_avg_speed": float(avg_speed),
             "agent_avg_accel": float(avg_accel),
             "agent_total_distance": self.telemetry["agent_total_distance"],
+            "agent_times": list(self.telemetry["agent_times"]),
+            "agent_distances": list(self.telemetry["agent_distances"]),
+            "agent_speeds": list(self.telemetry["agent_speeds"]),
+            "agent_accelerations": list(self.telemetry["agent_accelerations"]),
+            "agent_jerks": list(self.telemetry["agent_jerks"]),
             "episode_length": self.time_counter,
             "reward_speed": self.telemetry["reward_speed_total"],
             "reward_time": self.telemetry["reward_time_total"],

@@ -6,9 +6,9 @@ import os
 from shapely.geometry import LineString, Point
 sys.path.append(os.path.dirname(__file__))
 
-from base_env_single import Env_N
+from alpha_env_v01 import AlphaEnv_v01
 
-class AlphaEnv_v01_Attention(Env_N):
+class AlphaEnv_v01_Attention(AlphaEnv_v01):
     """
     Multi-Agent Alpha environment with stability fixes.
     """
@@ -44,6 +44,7 @@ class AlphaEnv_v01_Attention(Env_N):
         self.last_obs = np.zeros(self.observation_space.shape[0], dtype=np.float32)
     
     def get_state(self):
+        self._update_routes()
         rl_ids = self.k.vehicle.get_rl_ids()
         if self.agent_id not in rl_ids:
             return self.last_obs
@@ -101,7 +102,7 @@ class AlphaEnv_v01_Attention(Env_N):
             other_x, other_y = other_pos
             distance = np.sqrt((other_x - ego_x)**2 + (other_y - ego_y)**2)
     
-            if not (distance <= self.perception_radius):
+            if not (self._is_conflicting(ego_id, other_id) and distance <= self.perception_radius):
                 continue
     
             # Neighbor speed
@@ -166,28 +167,44 @@ class AlphaEnv_v01_Attention(Env_N):
                 if ego_line.distance(other_point) < SAME_PATH_TOLERANCE:
                     other_proj = ego_line.project(other_point)
                     if other_proj >= ego_pos_on_edge:
-                        ego_dist_to_cp = max(0.0, other_proj - ego_pos_on_edge)
+                        leader_len = getattr(self.k.vehicle, 'get_length', lambda _id: 5.0)(other_id)
+                        ego_dist_to_cp = max(0.0, other_proj - ego_pos_on_edge - leader_len)
+                        other_dist_to_cp = 0.0
                     else:
-                        other_dist_to_cp = max(0.0, ego_pos_on_edge - other_proj)
+                        ego_len = getattr(self.k.vehicle, 'get_length', lambda _id: 5.0)(ego_id)
+                        other_dist_to_cp = max(0.0, ego_pos_on_edge - other_proj - ego_len)
+                        ego_dist_to_cp = 0.0
                     is_car_following = True
                     
                 # 2. Check if Ego is physically on Other's path (Ego is in front/behind Other)
                 elif other_line.distance(ego_point) < SAME_PATH_TOLERANCE:
                     ego_proj = other_line.project(ego_point)
                     if ego_proj >= other_pos_on_edge:
-                        other_dist_to_cp = max(0.0, ego_proj - other_pos_on_edge)
+                        ego_len = getattr(self.k.vehicle, 'get_length', lambda _id: 5.0)(ego_id)
+                        other_dist_to_cp = max(0.0, ego_proj - other_pos_on_edge - ego_len)
+                        ego_dist_to_cp = 0.0
                     else:
-                        ego_dist_to_cp = max(0.0, other_pos_on_edge - ego_proj)
+                        leader_len = getattr(self.k.vehicle, 'get_length', lambda _id: 5.0)(other_id)
+                        ego_dist_to_cp = max(0.0, other_pos_on_edge - ego_proj - leader_len)
+                        other_dist_to_cp = 0.0
                     is_car_following = True
                     
                 # 3. Merging (Vehicles are on different unshared branches approaching the overlap)
                 if not is_car_following:
                     # The conflict point is the very beginning of the overlapping segment
                     if hasattr(intersection, 'geoms'): 
-                        # Handles MultiLineString and GeometryCollection
-                        first_geom = intersection.geoms[0]
-                        # If the first item in the collection is a Line/Point, grab its first coord
-                        overlap_start = Point(first_geom.coords[0]) if hasattr(first_geom, 'coords') else Point(first_geom.geoms[0].coords[0])
+                        candidates = []
+                        for geom in intersection.geoms:
+                            if hasattr(geom, 'coords') and len(geom.coords) > 0:
+                                candidates.append(Point(geom.coords[0]))
+                            elif hasattr(geom, 'geoms'):
+                                for g in geom.geoms:
+                                    if hasattr(g, 'coords') and len(g.coords) > 0:
+                                        candidates.append(Point(g.coords[0]))
+                        if candidates:
+                            overlap_start = min(candidates, key=lambda p: ego_line.project(p))
+                        else:
+                            overlap_start = Point(intersection.coords[0])
                     else:
                         # Handles standard LineString
                         overlap_start = Point(intersection.coords[0])
@@ -200,7 +217,7 @@ class AlphaEnv_v01_Attention(Env_N):
             ego_eta = ego_dist_to_cp / max(ego_speed, 0.5)
             other_eta = other_dist_to_cp / max(other_speed, 0.5)
             delta_eta = ego_eta - other_eta
-            delta_eta_norm =  np.tanh(delta_eta / 2.0)
+            delta_eta_norm =  np.tanh(delta_eta / 5.0)
 
             ego_dist_to_cp = np.clip(ego_dist_to_cp / self.perception_radius, 0, 1)
             neighbors_info.append({

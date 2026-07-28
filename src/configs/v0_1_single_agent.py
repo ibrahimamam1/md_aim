@@ -14,13 +14,12 @@ parser.add_argument("--version", choices=["heuristic_discrete", "heuristic_conti
 args = parser.parse_args()
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-from networks.uniform_random import UniformRandomNetwork as myNet
+from networks.asymetric_random import AsymmetricRandomNetwork as myNet
 from flow.core.params import (
     VehicleParams, NetParams, InitialConfig, TrafficLightParams,
     EnvParams, SumoParams, SumoCarFollowingParams, InFlows,
 )
 from flow.controllers import RLController, IDMController
-from src.utils.plot_train_curves import plot_results
 
 # ---------------------------------------------
 # SB3 Imports
@@ -309,12 +308,6 @@ def train():
     print(f"Saved Model  → {final_model_path}.zip")
     print(f"TensorBoard → {TENSORBOARD_RUN_DIR}")
     
-    # Optional: If your plot_results supports SB3 tensorboard formatting
-    plot_out = os.path.join(root_dir, "outputs", "train", RUN_NAME)
-    try:
-        plot_results(logdir=TENSORBOARD_RUN_DIR, output_dir=plot_out, exp_name=RUN_NAME)
-    except Exception as e:
-        print(f"Note: Could not run plot_results. Check if it's strictly compatible with RLlib tensorboard formatting. Error: {e}")
 
     vec_env.close()
 
@@ -366,7 +359,7 @@ def print_neighbor_table(step_num, obs, reward, neighbors_info, terminated, trun
             dist_norm = n['distance']
             speed_pct = n['v']
             ego_d = n['ego_dist_to_cp']
-            delta_eta = n['delta_eta'] # FIX 4: Corrected key lookup 
+            delta_eta = n['d_eta'] # FIX 4: Corrected key lookup 
             bar = _risk_bar(ego_d)
             edge = n['edge'][:12].ljust(12)
 

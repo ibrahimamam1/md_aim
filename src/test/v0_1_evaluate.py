@@ -60,9 +60,6 @@ os.makedirs(output_dir, exist_ok=True)
 scenarios = {"rbl": "100m_right_before_left.net.xml"}
 
 intentions = {
-    "all_straight": AllStraghtNetwork,
-    "all_left": AllLeftNetwork,
-    "uniform_random": UniformRandomNetwork,
     "asymetric_random": AsymmetricRandomNetwork
 }
 
@@ -98,6 +95,7 @@ traffic_rates = {
 
 CSV_HEADER = [
     "run", "collision", "success", "avg_speed", "travel_time", "waiting_time",
+    "time_profile", "distance_profile", "velocity_profile", "jerk_profile", "acceleration_profile",
 ]
 
 # ─────────────── Version-specific setup ──────────────
@@ -269,7 +267,9 @@ def main():
                             done = dones[0]
                             info = infos[0]
 
-                        telemetry = info.get("telemetry", {})
+                        def _fmt_profile(arr):
+                            return ";".join(f"{float(x):.4f}" for x in arr)
+
                         row = {
                             "run":          run_idx,
                             "collision":    1 if telemetry.get("agent_collision", False) else 0,
@@ -277,6 +277,11 @@ def main():
                             "avg_speed":    f"{telemetry.get('agent_avg_speed',    0.0):.4f}",
                             "travel_time":  f"{telemetry.get('agent_travel_time',  0.0):.4f}",
                             "waiting_time": f"{telemetry.get('agent_waiting_time', 0.0):.4f}",
+                            "time_profile": _fmt_profile(telemetry.get("agent_times", [])),
+                            "distance_profile": _fmt_profile(telemetry.get("agent_distances", [])),
+                            "velocity_profile": _fmt_profile(telemetry.get("agent_speeds", [])),
+                            "jerk_profile": _fmt_profile(telemetry.get("agent_jerks", [])),
+                            "acceleration_profile": _fmt_profile(telemetry.get("agent_accelerations", [])),
                         }
 
                     except Exception as exc:
@@ -322,8 +327,9 @@ def main():
     try:
         plot_eval_results(
             output_dir=output_dir,
-            version_filter=version,
-            save_path=os.path.join(output_dir, f"heuristic_discrete.png"),
+            version_filter=None,
+            intention_filter="asymetric_random",
+            save_path=os.path.join(output_dir, "eval_results.png"),
             show=False,
         )
     except Exception as e:

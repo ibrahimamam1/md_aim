@@ -2,6 +2,7 @@ from flow.networks import Network
 import xml.etree.ElementTree as ElementTree
 from lxml import etree
 import random 
+import numpy as np
 #
 # default sumo probability value  TODO (ak): remove
 DEFAULT_PROBABILITY = 0
@@ -151,16 +152,46 @@ class AsymmetricRandomNetwork(Network):
                 (["E#L-X", "E#X-R"], 0.5),  
                 (["E#L-X", "E#X-T"], 0.5),    
             ],
-
             "E#R-X": [
                 (["E#R-X", "E#X-L"], 0.5),
                 (["E#R-X", "E#X-D"], 0.5), 
             ],
         }, 
+        ]
 
-               ]
-        routes = random.choice(rts)
-        return rts[1]
+        # Generate 150 training scenarios using Dirichlet distribution (alpha = [1, 1, 1])
+        num_dirichlet_scenarios = 150
+        for _ in range(num_dirichlet_scenarios):
+            p_T = np.random.dirichlet(np.ones(3))
+            p_D = np.random.dirichlet(np.ones(3))
+            p_L = np.random.dirichlet(np.ones(3))
+            p_R = np.random.dirichlet(np.ones(3))
+
+            scenario = {
+                "E#T-X": [
+                    (["E#T-X", "E#X-D"], float(p_T[0])),
+                    (["E#T-X", "E#X-L"], float(p_T[1])),
+                    (["E#T-X", "E#X-R"], float(p_T[2])),
+                ],
+                "E#D-X": [
+                    (["E#D-X", "E#X-T"], float(p_D[0])),
+                    (["E#D-X", "E#X-R"], float(p_D[1])),
+                    (["E#D-X", "E#X-L"], float(p_D[2])),
+                ],
+                "E#L-X": [
+                    (["E#L-X", "E#X-R"], float(p_L[0])),
+                    (["E#L-X", "E#X-D"], float(p_L[1])),
+                    (["E#L-X", "E#X-T"], float(p_L[2])),
+                ],
+                "E#R-X": [
+                    (["E#R-X", "E#X-L"], float(p_R[0])),
+                    (["E#R-X", "E#X-T"], float(p_R[1])),
+                    (["E#R-X", "E#X-D"], float(p_R[2])),
+                ],
+            }
+            rts.append(scenario)
+
+        return random.choice(rts)
 
 
     def _vehicle_type_custom(filename):
