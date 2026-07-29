@@ -31,11 +31,13 @@ from matplotlib.ticker import MaxNLocator
 
 # ── Aesthetic config ──────────────────────────────────────────────────────────
 VERSION_COLORS = {
+    "heuristic_continuous":          "#2E86AB",   # steel blue
     "heuristic_continous":           "#2E86AB",   # steel blue
     "heuristic_discrete":            "#A23B72",   # deep magenta/purple
     "heuristic_discrete_3":          "#C56E90",   # lighter magenta
     "heuristic_discrete_5":          "#A23B72",   # deep magenta/purple
     "heuristic_discrete_10":         "#6F1D4A",   # darker magenta
+    "attention_continuous":          "#F18F01",   # warm amber/orange
     "attention_continous":           "#F18F01",   # warm amber/orange
     "attention_discrete":            "#C73E1D",   # vivid red/terracotta
     "attention_discrete_3":          "#E26D52",   # lighter terracotta
@@ -46,11 +48,13 @@ VERSION_COLORS = {
 }
 
 VERSION_LABELS = {
+    "heuristic_continuous":          "Heuristic (Continuous)",
     "heuristic_continous":           "Heuristic (Continuous)",
     "heuristic_discrete":            "Heuristic (Discrete)",
     "heuristic_discrete_3":          "Heuristic (Discrete 3)",
     "heuristic_discrete_5":          "Heuristic (Discrete 5)",
     "heuristic_discrete_10":         "Heuristic (Discrete 10)",
+    "attention_continuous":          "Attention (Continuous)",
     "attention_continous":           "Attention (Continuous)",
     "attention_discrete":            "Attention (Discrete)",
     "attention_discrete_3":          "Attention (Discrete 3)",
@@ -106,8 +110,8 @@ GRID_ALPHA     = 0.25
 # Expected: {scen}_{intention}_{rate_key}_{version}.csv
 _VERSIONS   = [
     "heuristic_attention_continous", "heuristic_attention_discrete",
-    "heuristic_continous", "heuristic_discrete_10", "heuristic_discrete_5", "heuristic_discrete_3", "heuristic_discrete",
-    "attention_continous", "attention_discrete_10", "attention_discrete_5", "attention_discrete_3", "attention_discrete",
+    "heuristic_continuous", "heuristic_continous", "heuristic_discrete_10", "heuristic_discrete_5", "heuristic_discrete_3", "heuristic_discrete",
+    "attention_continuous", "attention_continous", "attention_discrete_10", "attention_discrete_5", "attention_discrete_3", "attention_discrete",
 ]
 _INTENTIONS = [
     "asymetric_random", "asymmetric_random",

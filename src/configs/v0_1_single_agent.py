@@ -11,9 +11,9 @@ group.add_argument("--eval",  metavar="CHECKPOINT_PATH",
                    help="Path to a checkpoint zip file to load and evaluate.")
 parser.add_argument("--version", choices=[
     "heuristic_discrete", "heuristic_discrete_3", "heuristic_discrete_5", "heuristic_discrete_10",
-    "heuristic_continuous",
+    "heuristic_continuous", "heuristic_continous",
     "attention_discrete", "attention_discrete_3", "attention_discrete_5", "attention_discrete_10",
-    "attention_continous"
+    "attention_continuous", "attention_continous"
 ], default="heuristic_discrete", help="Environment version to use.")
 args = parser.parse_args()
 
@@ -162,7 +162,7 @@ flow_params = dict(
 def create_flow_env(env_config):
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     
-    if args.version == "heuristic_continuous":
+    if args.version in ("heuristic_continuous", "heuristic_continous"):
         from src.envs.alpha_env_v01 import AlphaEnv_v01 as EnvClass
     elif args.version == "heuristic_discrete":
         from src.envs.alpha_env_v01_discrete import AlphaEnv_v01_Discrete as EnvClass
@@ -180,7 +180,7 @@ def create_flow_env(env_config):
         from src.envs.alpha_env_v01_attention_discrete import AlphaEnv_v01_AttentionDiscrete_5 as EnvClass
     elif args.version == "attention_discrete_10":
         from src.envs.alpha_env_v01_attention_discrete import AlphaEnv_v01_AttentionDiscrete_10 as EnvClass
-    elif args.version == "attention_continous":
+    elif args.version in ("attention_continuous", "attention_continous"):
         from src.envs.alpha_env_v01_attention_continous import AlphaEnv_v01_Attention as EnvClass
     else:
         raise ValueError(f"Unknown environment version: {args.version}")

@@ -15,6 +15,7 @@ _soft, _hard = resource.getrlimit(resource.RLIMIT_NOFILE)
 resource.setrlimit(resource.RLIMIT_NOFILE, (min(_hard, 65536), _hard))
 # ─────────────────────────────────────────────────────────────────────────────
 
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
@@ -39,14 +40,15 @@ from plot_eval_results import plot_eval_results
 parser = argparse.ArgumentParser(description="Evaluate trained v0.1 agent.")
 parser.add_argument("--checkpoint", required=True, help="Path to checkpoint (without .zip).")
 parser.add_argument("--version", required=True,
-                    choices=["heuristic_continous", "heuristic_discrete",
-                             "heuristic_discrete_3", "heuristic_discrete_5", "heuristic_discrete_10",
-                             "attention_continous", "attention_discrete",
-                             "attention_discrete_3", "attention_discrete_5", "attention_discrete_10",
-                             "heuristic_attention_continous", "heuristic_attention_discrete"])
+                    choices=[
+                        "heuristic_continuous", "heuristic_continous",
+                        "heuristic_discrete", "heuristic_discrete_3", "heuristic_discrete_5", "heuristic_discrete_10",
+                        "attention_continuous", "attention_continous",
+                        "attention_discrete", "attention_discrete_3", "attention_discrete_5", "attention_discrete_10"
+                    ])
 parser.add_argument("--n_sims", type=int, default=42, help="Runs per scenario combo.")
 parser.add_argument("--render", action="store_true", default=False)
-args = parser.parse_args()
+args = parser.parse_args() if __name__ == '__main__' else None
 
 # ─────────────── Sim Params ────────────────────
 min_gap=2.5; max_accel=2.6; max_decel=4.5; max_speed=55; initial_speed=0
@@ -102,7 +104,7 @@ CSV_HEADER = [
 
 # ─────────────── Version-specific setup ──────────────
 def _get_env_class(version):
-    if version == "heuristic_continous":
+    if version in ("heuristic_continuous", "heuristic_continous"):
         from envs.alpha_env_v01 import AlphaEnv_v01
         return AlphaEnv_v01
     elif version == "heuristic_discrete":
@@ -117,7 +119,7 @@ def _get_env_class(version):
     elif version == "heuristic_discrete_10":
         from envs.alpha_env_v01_discrete import AlphaEnv_v01_Discrete_10
         return AlphaEnv_v01_Discrete_10
-    elif version == "attention_continous":
+    elif version in ("attention_continuous", "attention_continous"):
         from envs.alpha_env_v01_attention_continous import AlphaEnv_v01_Attention
         return AlphaEnv_v01_Attention
     elif version == "attention_discrete":
@@ -132,12 +134,8 @@ def _get_env_class(version):
     elif version == "attention_discrete_10":
         from envs.alpha_env_v01_attention_discrete import AlphaEnv_v01_AttentionDiscrete_10
         return AlphaEnv_v01_AttentionDiscrete_10
-    elif version == "heuristic_attention_continous":
-        from envs.alpha_env_v01_heuristic_attention_continous import AlphaEnv_v01_HeuristicAttention
-        return AlphaEnv_v01_HeuristicAttention
-    elif version == "heuristic_attention_discrete":
-        from envs.alpha_env_v01_heuristic_attention_discrete import AlphaEnv_v01_HeuristicAttentionDiscrete
-        return AlphaEnv_v01_HeuristicAttentionDiscrete
+    else:
+        raise ValueError(f"Unknown environment version: {version}")
 
 
 def _build_inflows(traffic_rate):

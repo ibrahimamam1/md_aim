@@ -193,9 +193,85 @@ class TestFrenetAndConflicts(unittest.TestCase):
         self.assertTrue(hasattr(AlphaEnv_v01_Attention, '_is_conflicting'), "AlphaEnv_v01_Attention must have _is_conflicting attribute")
         self.assertTrue(hasattr(AlphaEnv_v01_Attention, '_build_conflict_map'), "AlphaEnv_v01_Attention must have _build_conflict_map attribute")
         import inspect
-        source = inspect.getsource(AlphaEnv_v01_Attention._get_local_observation)
-        self.assertIn("_is_conflicting(ego_id, other_id)", source, "AlphaEnv_v01_Attention._get_local_observation must check self._is_conflicting(ego_id, other_id)")
+        source_att = inspect.getsource(AlphaEnv_v01_Attention._get_local_observation)
+        source_base = inspect.getsource(AlphaEnv_v01._get_local_observation)
+        self.assertTrue(
+            "_is_conflicting(ego_id, other_id)" in source_att or "super()._get_local_observation" in source_att,
+            "AlphaEnv_v01_Attention._get_local_observation must check _is_conflicting or call super()._get_local_observation"
+        )
+        self.assertIn("_is_conflicting(ego_id, other_id)", source_base, "AlphaEnv_v01._get_local_observation must check self._is_conflicting(ego_id, other_id)")
+
+    def test_attention_env_observation_matches_standard_plus_mask(self):
+        """Verify that AlphaEnv_v01_Attention._get_local_observation produces the exact same features as AlphaEnv_v01 plus the neighbor mask."""
+        env_std = AlphaEnv_v01.__new__(AlphaEnv_v01)
+        env_att = AlphaEnv_v01_Attention.__new__(AlphaEnv_v01_Attention)
+
+        for e in [env_std, env_att]:
+            e.perception_radius = 100.0
+            e.max_neighbours = 5
+            e.conflict_map = e._build_conflict_map()
+            e.routes = {"ego": ("E#T-X", "E#X-D"), "other1": ("E#T-X", "E#X-D")}
+            e.last_obs = np.zeros(29 if isinstance(e, AlphaEnv_v01) and not isinstance(e, AlphaEnv_v01_Attention) else 34, dtype=np.float32)
+            e._get_vehicle_polyline = lambda veh_id: (LineString([(0, 0), (0, 100)]), 20.0 if veh_id == "ego" else 30.0)
+
+            class DummyVehicle:
+                def get_route(self, _id): return ("E#T-X", "E#X-D")
+                def get_distance(self, _id): return 20.0 if _id == "ego" else 30.0
+                def get_speed(self, _id): return 10.0
+                def get_heading(self, _id): return 0.0
+                def get_ids(self): return ["ego", "other1"]
+                def get_2d_position(self, _id): return (0.0, 20.0) if _id == "ego" else (0.0, 30.0)
+                def get_edge(self, _id): return "E#T-X"
+                def get_position(self, _id): return 20.0 if _id == "ego" else 30.0
+                def get_length(self, _id): return 5.0
+
+            class DummyNetwork:
+                def edge_length(self, _edge): return 100.0
+                def max_speed(self): return 30.0
+
+            e.k = type('DummyK', (), {'vehicle': DummyVehicle(), 'network': DummyNetwork()})()
+
+        obs_std, info_std = env_std._get_local_observation("ego")
+        obs_att, info_att = env_att._get_local_observation("ego")
+
+        # 1. Neighbor info must match
+        self.assertEqual(len(info_std), len(info_att))
+        for k_key in info_std[0].keys():
+            self.assertAlmostEqual(info_std[0][k_key], info_att[0][k_key], places=6)
+
+        # 2. Attention observation must be standard observation + neighbor mask (1 actual + 4 padded = [1.0, 0.0, 0.0, 0.0, 0.0])
+        expected_mask = np.array([1.0, 0.0, 0.0, 0.0, 0.0], dtype=np.float32)
+        expected_att_obs = np.concatenate([obs_std, expected_mask])
+        np.testing.assert_allclose(obs_att, expected_att_obs, rtol=1e-5, atol=1e-5)
+
+    def test_attention_env_inherits_compute_reward(self):
+        """Verify that AlphaEnv_v01_Attention inherits compute_reward from AlphaEnv_v01 without overriding it."""
+        self.assertNotIn(
+            "compute_reward",
+            AlphaEnv_v01_Attention.__dict__,
+            "AlphaEnv_v01_Attention must inherit compute_reward from AlphaEnv_v01 without overriding it"
+        )
+
+    def test_version_keys_parity_between_train_and_eval(self):
+        """Verify that all version keys work cleanly in v0_1_evaluate._get_env_class and support continuous/continous spellings."""
+        from src.test.v0_1_evaluate import _get_env_class
+        expected_versions = [
+            "heuristic_continuous", "heuristic_continous",
+            "heuristic_discrete", "heuristic_discrete_3", "heuristic_discrete_5", "heuristic_discrete_10",
+            "attention_continuous", "attention_continous",
+            "attention_discrete", "attention_discrete_3", "attention_discrete_5", "attention_discrete_10"
+        ]
+        for ver in expected_versions:
+            cls = _get_env_class(ver)
+            self.assertTrue(hasattr(cls, "step"), f"Version key '{ver}' did not return a valid environment class")
+
+        self.assertIs(_get_env_class("heuristic_continuous"), _get_env_class("heuristic_continous"))
+        self.assertIs(_get_env_class("attention_continuous"), _get_env_class("attention_continous"))
+
+        with self.assertRaises(ValueError):
+            _get_env_class("invalid_version")
 
 
 if __name__ == '__main__':
     unittest.main()
+
