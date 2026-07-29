@@ -258,8 +258,8 @@ class AlphaEnv_v01(Env_N):
     
         for neighbor in neighbors_info:
             obs_vector.extend([
-                neighbor['ego_dist_to_cp'],
-                neighbor['other_dist_to_cp'],
+                neighbor['ego_dist_to_cp_norm'],
+                neighbor['other_dist_to_cp_norm'],
                 neighbor['other_speed'],
                 neighbor['other_sin'],
                 neighbor['other_cos'],
