@@ -218,7 +218,7 @@ def _load_csvs(
     """
     data: dict = defaultdict(lambda: defaultdict(list))
     profiles_by_version: dict = defaultdict(lambda: {
-        "times": [], "distances": [], "velocities": [], "jerks": [], "accelerations": []
+        "times": [], "distances": [], "velocities": [], "jerks": [], "jerk_times": [], "accelerations": []
     })
     parsed_files = []
 
@@ -267,16 +267,16 @@ def _load_csvs(
                 t_arr = _parse_profile_str(row.get("time_profile", ""))
                 d_arr = _parse_profile_str(row.get("distance_profile", ""))
                 v_arr = _parse_profile_str(row.get("velocity_profile", ""))
-                j_arr = _parse_profile_str(row.get("jerk_profile", ""))
                 a_arr = _parse_profile_str(row.get("acceleration_profile", ""))
 
                 if len(t_arr) > 0 and len(v_arr) == len(t_arr):
                     profiles_by_version[version]["times"].extend(t_arr)
                     profiles_by_version[version]["velocities"].extend(v_arr)
+                    if len(v_arr) > 1:
+                        profiles_by_version[version]["jerk_times"].extend(t_arr[1:])
+                        profiles_by_version[version]["jerks"].extend(np.diff(v_arr))
                 if len(d_arr) > 0 and len(v_arr) == len(d_arr):
                     profiles_by_version[version]["distances"].extend(d_arr)
-                if len(t_arr) > 0 and len(j_arr) == len(t_arr):
-                    profiles_by_version[version]["jerks"].extend(j_arr)
                 if len(t_arr) > 0 and len(a_arr) == len(t_arr):
                     profiles_by_version[version]["accelerations"].extend(a_arr)
 
@@ -537,7 +537,7 @@ def plot_eval_results(
 
     fig, axes = plt.subplots(2, 3, figsize=FIGSIZE)
     fig.suptitle(
-        f"Evaluation Results & Velocity/Jerk Profiles{title_suffix}",
+        f"Evaluation Results & Velocity/Velocity Difference Profiles{title_suffix}",
         fontsize=TITLE_FONTSIZE + 2,
         fontweight="bold",
         y=0.98,
@@ -604,11 +604,11 @@ def plot_eval_results(
         ax_jt,
         profiles_by_version,
         versions,
-        "times",
+        "jerk_times",
         "jerks",
         "Time (s)",
-        "Jerk (m/s³)",
-        "Jerk Profile vs. Time",
+        "ΔVelocity (m/s)",
+        "Velocity Difference vs. Time",
     )
 
     # Shared legend below all charts
@@ -641,7 +641,7 @@ def plot_eval_results(
         scatter_save_path = f"{base}_profiles_scatter{ext}"
         fig_scat, ax_scat = plt.subplots(1, 3, figsize=(18, 5))
         fig_scat.suptitle(
-            f"Velocity & Jerk Profile Scatters{title_suffix}",
+            f"Velocity & Velocity Difference Profile Scatters{title_suffix}",
             fontsize=TITLE_FONTSIZE + 2,
             fontweight="bold",
             y=1.03,
@@ -655,8 +655,8 @@ def plot_eval_results(
             "Distance (m)", "Velocity (m/s)", "Velocity Profile vs. Distance"
         )
         _make_profile_scatter(
-            ax_scat[2], profiles_by_version, versions, "times", "jerks",
-            "Time (s)", "Jerk (m/s³)", "Jerk Profile vs. Time"
+            ax_scat[2], profiles_by_version, versions, "jerk_times", "jerks",
+            "Time (s)", "ΔVelocity (m/s)", "Velocity Difference vs. Time"
         )
         fig_scat.legend(
             handles=handles,

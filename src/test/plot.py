@@ -1,23 +1,31 @@
 """
 plot.py  —  Academic-quality figures for intersection-controller evaluation.
 
-Produces four figures:
+Produces figures:
+  Fig 0 — Summary bar charts     (Collision Rate & Travel Time across all scenarios)
   Fig 1 — Collision Rate curves  (4 subplots, one per intention)
   Fig 2 — Collision Rate heatmap (controller × traffic scenario, avg over intentions)
   Fig 3 — Travel Time curves     (4 subplots, one per intention)
   Fig 4 — Travel Time heatmap    (controller × traffic scenario, avg over intentions)
+
+Usage:
+  python src/test/plot.py /path/to/results
+  python src/test/plot.py --results_dir /path/to/results --output_dir /path/to/save_plots
 
 CSV naming convention:
   rbl_{intention}_{traffic_scenario}_{controller}.csv
   e.g.  rbl_uniform_random_Sc6_Mixed_ML_heuristic_discrete.csv
 """
 
+
+import argparse
 import os
 import re
 import warnings
 from glob import glob
 
 import matplotlib
+import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import numpy as np
@@ -27,11 +35,10 @@ import seaborn as sns
 warnings.filterwarnings("ignore")
 
 # ---------------------------------------------------------------------------
-# Paths  — adjust results_dir / output_dir to match your folder layout
+# Paths  — default output_dir
 # ---------------------------------------------------------------------------
-_HERE       = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-results_dir = os.path.join(_HERE, "output")   # ← folder that holds the CSVs
-output_dir  = os.path.join(_HERE, "plots")
+_HERE      = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+output_dir = os.path.join(_HERE, "plots")
 os.makedirs(output_dir, exist_ok=True)
 
 # ---------------------------------------------------------------------------
@@ -93,20 +100,20 @@ SCENARIO_LABELS = {
 
 # Controllers present in the filenames
 CONTROLLERS = {
-    "heuristic_attention_discrete":  "Heuristic+Attention + Discrete",
-    "heuristic_attention_continous": "Heuristic+Attention + Continuous",
-    "heuristic_discrete_10":         "Heuristic + Discrete (10)",
-    "heuristic_discrete_5":          "Heuristic + Discrete (5)",
     "heuristic_discrete_3":          "Heuristic + Discrete (3)",
+    "heuristic_discrete_5":          "Heuristic + Discrete (5)",
+    "heuristic_discrete_10":         "Heuristic + Discrete (10)",
     "heuristic_discrete":            "Heuristic + Discrete",
     "heuristic_continuous":          "Heuristic + Continuous",
     "heuristic_continous":           "Heuristic + Continuous",
-    "attention_discrete_10":         "Attention + Discrete (10)",
-    "attention_discrete_5":          "Attention + Discrete (5)",
     "attention_discrete_3":          "Attention + Discrete (3)",
+    "attention_discrete_5":          "Attention + Discrete (5)",
+    "attention_discrete_10":         "Attention + Discrete (10)",
     "attention_discrete":            "Attention + Discrete",
     "attention_continuous":          "Attention + Continuous",
     "attention_continous":           "Attention + Continuous",
+    "heuristic_attention_discrete":  "Heuristic+Attention + Discrete",
+    "heuristic_attention_continous": "Heuristic+Attention + Continuous",
 }
 
 # Intentions present in the filenames
@@ -336,7 +343,7 @@ def load_profiles(data_dir: str) -> dict:
     grouped by controller.
     """
     csv_files = glob(os.path.join(data_dir, "*.csv"))
-    profiles = {ctrl: {"times": [], "distances": [], "velocities": [], "jerks": [], "accelerations": []} for ctrl in CONTROLLERS}
+    profiles = {ctrl: {"times": [], "distances": [], "velocities": [], "jerks": [], "jerk_times": [], "accelerations": []} for ctrl in CONTROLLERS}
 
     for path in csv_files:
         meta = parse_filename(path)
@@ -352,16 +359,16 @@ def load_profiles(data_dir: str) -> dict:
             t_arr = parse_profile_str(row.get("time_profile", ""))
             d_arr = parse_profile_str(row.get("distance_profile", ""))
             v_arr = parse_profile_str(row.get("velocity_profile", ""))
-            j_arr = parse_profile_str(row.get("jerk_profile", ""))
             a_arr = parse_profile_str(row.get("acceleration_profile", ""))
 
             if len(t_arr) > 0 and len(v_arr) == len(t_arr):
                 profiles[ctrl]["times"].extend(t_arr)
                 profiles[ctrl]["velocities"].extend(v_arr)
+                if len(v_arr) > 1:
+                    profiles[ctrl]["jerk_times"].extend(t_arr[1:])
+                    profiles[ctrl]["jerks"].extend(np.diff(v_arr))
             if len(d_arr) > 0 and len(v_arr) == len(d_arr):
                 profiles[ctrl]["distances"].extend(d_arr)
-            if len(t_arr) > 0 and len(j_arr) == len(t_arr):
-                profiles[ctrl]["jerks"].extend(j_arr)
             if len(t_arr) > 0 and len(a_arr) == len(t_arr):
                 profiles[ctrl]["accelerations"].extend(a_arr)
 
@@ -428,7 +435,7 @@ def plot_profile_scatters(profiles: dict, output_dir: str):
     configs = [
         ("times", "velocities", "Time (s)", "Velocity (m/s)", "Velocity Profile vs. Time", "fig5_velocity_vs_time_scatter"),
         ("distances", "velocities", "Distance (m)", "Velocity (m/s)", "Velocity Profile vs. Distance", "fig6_velocity_vs_distance_scatter"),
-        ("times", "jerks", "Time (s)", "Jerk (m/s³)", "Jerk Profile vs. Time", "fig7_jerk_vs_time_scatter"),
+        ("jerk_times", "jerks", "Time (s)", "ΔVelocity (m/s)", "Velocity Difference vs. Time", "fig7_jerk_vs_time_scatter"),
     ]
     for x_key, y_key, xlabel, ylabel, title, fname in configs:
         fig, ax = plt.subplots(1, 1, figsize=(7, 5))
@@ -479,6 +486,125 @@ def _add_legend(ax, handles_labels=None, title="Controller", ncol=1):
         edgecolor="0.8",
         loc="best",
     )
+
+
+# ---------------------------------------------------------------------------
+# FIGURE 0 — Summary Bar Charts (Collision Rate & Travel Time)
+# ---------------------------------------------------------------------------
+def plot_summary_bars(df: pd.DataFrame, output_dir: str):
+    """
+    Produces a 1x2 summary panel figure of horizontal bar charts comparing
+    all present controllers across all traffic scenarios & intentions:
+      - Left: Mean Collision Rate (%) with SEM error bars & text labels
+      - Right: Mean Travel Time (s) with SEM error bars & text labels
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    controllers_present = [c for c in CONTROLLERS if c in df["controller"].unique()]
+    if not controllers_present:
+        controllers_present = sorted(df["controller"].unique())
+
+    # Reverse order so the first controller in CONTROLLERS is plotted at the top of barh
+    controllers_plot = controllers_present[::-1]
+    n_ctrl = len(controllers_plot)
+    y_pos = np.arange(n_ctrl)
+
+    fig_height = max(4.2, n_ctrl * 0.78 + 1.5)
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16.0, fig_height))
+
+    def _draw_summary_barh(ax, metric: str, xlabel: str, title: str, is_pct: bool):
+        means = []
+        sems = []
+        colors = []
+        labels = []
+
+        for c in controllers_plot:
+            sub = df[df["controller"] == c][metric].dropna()
+            if len(sub) == 0:
+                m_val = 0.0
+                s_val = 0.0
+            else:
+                m_val = float(sub.mean())
+                s_val = float(sub.sem()) if len(sub) > 1 else 0.0
+
+            if is_pct:
+                m_val *= 100.0
+                s_val *= 100.0
+
+            if np.isnan(s_val):
+                s_val = 0.0
+
+            means.append(m_val)
+            sems.append(s_val)
+            colors.append(CONTROLLER_COLORS.get(c, "#333333"))
+            labels.append(CONTROLLERS.get(c, c))
+
+        bars = ax.barh(
+            y_pos,
+            means,
+            height=0.58,
+            xerr=sems,
+            color=colors,
+            alpha=0.90,
+            capsize=4,
+            error_kw={"elinewidth": 1.5, "capthick": 1.5, "ecolor": "black"},
+            zorder=3,
+        )
+
+        ax.set_yticks(y_pos)
+        ax.set_yticklabels(labels, fontsize=10.5)
+        ax.set_xlabel(xlabel, fontsize=12, fontweight="bold", labelpad=8)
+        ax.set_title(title, fontsize=13.5, fontweight="bold", pad=12)
+
+        ax.grid(True, axis="x", linestyle="--", alpha=0.35, zorder=0)
+        ax.grid(False, axis="y")
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+
+        max_x = max((m + s for m, s in zip(means, sems)), default=1.0)
+        max_x = max(max_x, 1.0)
+        ax.set_xlim(0, max_x * 1.25)
+
+        offset = max_x * 0.025
+        for i in range(n_ctrl):
+            if np.isnan(means[i]):
+                continue
+            x_pos = means[i] + sems[i] + offset
+            txt = f"{means[i]:.1f}%" if is_pct else f"{means[i]:.1f}s"
+            ax.text(
+                x_pos,
+                y_pos[i],
+                txt,
+                va="center",
+                ha="left",
+                fontsize=10.5,
+                fontweight="bold",
+                color="#111111",
+                zorder=5,
+            )
+
+    _draw_summary_barh(
+        ax1,
+        "collision_rate",
+        "Mean Collision Rate (%)",
+        "Collision Rate (all scenarios)",
+        is_pct=True,
+    )
+
+    _draw_summary_barh(
+        ax2,
+        "travel_time_mean",
+        "Mean Travel Time (s)",
+        "Travel Time (all scenarios)",
+        is_pct=False,
+    )
+
+    fig.tight_layout(pad=2.2, w_pad=3.8)
+
+    for ext in ["pdf", "png"]:
+        save_path = os.path.join(output_dir, f"fig0_summary_bars.{ext}")
+        fig.savefig(save_path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    print("Saved: fig0_summary_bars.pdf / .png")
 
 
 # ---------------------------------------------------------------------------
@@ -662,37 +788,82 @@ def plot_heatmap(df: pd.DataFrame, metric: str, output_dir: str):
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
-def main():
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Generate academic-quality figures for intersection-controller evaluation."
+    )
+    parser.add_argument(
+        "results_dir",
+        nargs="?",
+        default=None,
+        help="Path to the directory containing result CSV files.",
+    )
+    parser.add_argument(
+        "-r", "--results_dir", "--results-dir",
+        dest="results_dir_flag",
+        default=None,
+        help="Path to the directory containing result CSV files (flag alternative).",
+    )
+    parser.add_argument(
+        "-o", "--output_dir", "--output-dir",
+        dest="output_dir",
+        default=output_dir,
+        help="Directory to save generated plots (default: plots/)",
+    )
+    args = parser.parse_args()
+    results_dir_val = args.results_dir_flag or args.results_dir
+    if not results_dir_val:
+        parser.error(
+            "The results directory argument is required (e.g. 'python plot.py /path/to/results' "
+            "or '--results_dir /path/to/results')."
+        )
+    return results_dir_val, args.output_dir
+
+
+def main(results_dir: str = None, out_dir: str = None):
+    if results_dir is None or out_dir is None:
+        cli_results_dir, cli_output_dir = parse_args()
+        if results_dir is None:
+            results_dir = cli_results_dir
+        if out_dir is None:
+            out_dir = cli_output_dir
+
+    os.makedirs(out_dir, exist_ok=True)
+
     print("=" * 65)
     print("Intersection Controller Analysis — Academic Figures")
     print("=" * 65)
     print(f"Results dir : {results_dir}")
-    print(f"Output  dir : {output_dir}\n")
+    print(f"Output  dir : {out_dir}\n")
 
     df = load_data(results_dir)
 
+    # ── Fig 0 — Summary bar charts ───────────────────────────────────────────
+    print("\n[Fig 0] Summary bar charts (Collision Rate & Travel Time) …")
+    plot_summary_bars(df, out_dir)
+
     # ── Fig 1 — Collision rate curves ────────────────────────────────────────
     print("\n[Fig 1] Collision-rate line curves …")
-    plot_curves(df, "collision_rate", output_dir)
+    plot_curves(df, "collision_rate", out_dir)
 
     # ── Fig 2 — Collision rate heatmap ───────────────────────────────────────
     print("[Fig 2] Collision-rate heatmap …")
-    plot_heatmap(df, "collision_rate", output_dir)
+    plot_heatmap(df, "collision_rate", out_dir)
 
     # ── Fig 3 — Travel time curves ───────────────────────────────────────────
     print("[Fig 3] Travel-time line curves …")
-    plot_curves(df, "travel_time_mean", output_dir)
+    plot_curves(df, "travel_time_mean", out_dir)
 
     # ── Fig 4 — Travel time heatmap ──────────────────────────────────────────
     print("[Fig 4] Travel-time heatmap …")
-    plot_heatmap(df, "travel_time_mean", output_dir)
+    plot_heatmap(df, "travel_time_mean", out_dir)
 
     # ── Fig 5-8 — Profile scatter plots ──────────────────────────────────────
-    print("\n[Fig 5-8] Velocity & Jerk profile scatter plots …")
+    print("\n[Fig 5-8] Velocity & Velocity Difference profile scatter plots …")
     profiles = load_profiles(results_dir)
-    plot_profile_scatters(profiles, output_dir)
+    plot_profile_scatters(profiles, out_dir)
 
-    print(f"\nDone! All figures saved to: {output_dir}")
+    print(f"\nDone! All figures saved to: {out_dir}")
 
 
 if __name__ == "__main__":

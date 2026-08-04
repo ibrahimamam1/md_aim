@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <net version="1.20" junctionCornerDetail="5" limitTurnSpeed="5.50" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/net_file.xsd">
 
-    <location netOffset="0.00,0.00" convBoundary="-100.00,-100.00,100.00,100.00" origBoundary="-10000000000.00,-10000000000.00,10000000000.00,10000000000.00" projParameter="!"/>
+    <location netOffset="0.00,0.00" convBoundary="-22.00,-22.00,22.00,22.00" origBoundary="-10000000000.00,-10000000000.00,10000000000.00,10000000000.00" projParameter="!"/>
     
     <edge id=":X_0" function="internal">
         <lane id=":X_0_0" index="0" speed="6.51" length="17.06" shape="-1.60,12.00 -1.90,8.00 -3.00,5.40 -5.20,3.15 -8.00,1.90 -12.00,1.60"/>
@@ -57,22 +57,22 @@
     </edge>
     
     <edge id="E#X-D" from="X" to="Down" priority="-1">
-        <lane id="E#X-D_0" index="0" speed="13.89" length="88.00" shape="-1.60,-12.00 -1.60,-100.00"/>
+        <lane id="E#X-D_0" index="0" speed="13.89" length="10.00" shape="-1.60,-12.00 -1.60,-22.00"/>
     </edge>
     <edge id="E#X-L" from="X" to="Left" priority="-1">
-        <lane id="E#X-L_0" index="0" speed="13.89" length="88.00" shape="-12.00,1.60 -100.00,1.60"/>
+        <lane id="E#X-L_0" index="0" speed="13.89" length="10.00" shape="-12.00,1.60 -22.00,1.60"/>
     </edge>
     <edge id="E#X-R" from="X" to="Right" priority="-1">
-        <lane id="E#X-R_0" index="0" speed="13.89" length="88.00" shape="12.00,-1.60 100.00,-1.60"/>
+        <lane id="E#X-R_0" index="0" speed="13.89" length="10.00" shape="12.00,-1.60 22.00,-1.60"/>
     </edge>
     <edge id="E#X-T" from="X" to="Top" priority="-1">
-        <lane id="E#X-T_0" index="0" speed="13.89" length="88.00" shape="1.60,12.00 1.60,100.00"/>
+        <lane id="E#X-T_0" index="0" speed="13.89" length="10.00" shape="1.60,12.00 1.60,22.00"/>
     </edge>
 
-    <junction id="Down" type="dead_end" x="0.00" y="-100.00" incLanes="E#X-D_0" intLanes="" shape="0.00,-100.00 -3.20,-100.00 0.00,-100.00"/>
-    <junction id="Left" type="dead_end" x="-100.00" y="0.00" incLanes="E#X-L_0" intLanes="" shape="-100.00,0.00 -100.00,3.20 -100.00,0.00"/>
-    <junction id="Right" type="dead_end" x="100.00" y="0.00" incLanes="E#X-R_0" intLanes="" shape="100.00,0.00 100.00,-3.20 100.00,0.00"/>
-    <junction id="Top" type="dead_end" x="0.00" y="100.00" incLanes="E#X-T_0" intLanes="" shape="0.00,100.00 3.20,100.00 0.00,100.00"/>
+    <junction id="Down" type="dead_end" x="0.00" y="-22.00" incLanes="E#X-D_0" intLanes="" shape="0.00,-22.00 -3.20,-22.00 0.00,-22.00"/>
+    <junction id="Left" type="dead_end" x="-22.00" y="0.00" incLanes="E#X-L_0" intLanes="" shape="-22.00,0.00 -22.00,3.20 -22.00,0.00"/>
+    <junction id="Right" type="dead_end" x="22.00" y="0.00" incLanes="E#X-R_0" intLanes="" shape="22.00,0.00 22.00,-3.20 22.00,0.00"/>
+    <junction id="Top" type="dead_end" x="0.00" y="22.00" incLanes="E#X-T_0" intLanes="" shape="0.00,22.00 3.20,22.00 0.00,22.00"/>
 
     <junction id="X" type="right_before_left" x="0.00" y="0.00" incLanes="E#T-X_0 E#R-X_0 E#D-X_0 E#L-X_0" intLanes=":X_0_0 :X_1_0 :X_2_0 :X_3_0 :X_4_0 :X_5_0 :X_6_0 :X_7_0 :X_8_0 :X_9_0 :X_10_0 :X_11_0" shape="-3.20,12.00 3.20,12.00 3.70,8.90 4.50,7.00 5.80,5.75 7.50,4.40 9.90,3.68 12.00,3.20 12.00,-3.20 9.90,-3.68 7.50,-4.40 5.80,-5.75 4.50,-7.00 3.70,-8.90 3.20,-12.00 -3.20,-12.00 -3.70,-8.90 -4.50,-7.00 -5.80,-5.75 -7.50,-4.40 -9.90,-3.68 -12.00,-3.20 -12.00,3.20 -9.90,3.68 -7.50,4.40 -5.80,5.75 -4.50,7.00 -3.70,8.90 -3.20,12.00">
         <request index="0"  response="000000000000" foes="000100010000" cont="0"/>
