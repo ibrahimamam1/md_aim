@@ -1,0 +1,1 @@
+{"custom_metrics/success":1,"_step":5,"global_step":8192,"_wandb":{"runtime":41},"rollout/ep_len_mean":436.5,"time/fps":271,"custom_metrics/avg_speed":0.91274416,"_timestamp":1.786595911635086e+09,"_runtime":41.536022142,"custom_metrics/collision":0,"rollout/ep_rew_mean":-5.1631804}

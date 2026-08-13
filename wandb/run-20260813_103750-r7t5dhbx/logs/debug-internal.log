@@ -1,0 +1,18 @@
+{"time":"2026-08-13T10:37:50.141008429+06:00","level":"INFO","msg":"using version","core version":"0.18.7"}
+{"time":"2026-08-13T10:37:50.141039911+06:00","level":"INFO","msg":"created symlink","path":"/home/rgb/Desktop/research/frenet_sa _multi_discount/wandb/run-20260813_103750-r7t5dhbx/logs/debug-core.log"}
+{"time":"2026-08-13T10:37:50.243103038+06:00","level":"INFO","msg":"created new stream","id":"r7t5dhbx"}
+{"time":"2026-08-13T10:37:50.243128359+06:00","level":"INFO","msg":"stream: started","id":"r7t5dhbx"}
+{"time":"2026-08-13T10:37:50.244353653+06:00","level":"INFO","msg":"writer: Do: started","stream_id":"r7t5dhbx"}
+{"time":"2026-08-13T10:37:50.244416828+06:00","level":"INFO","msg":"sender: started","stream_id":"r7t5dhbx"}
+{"time":"2026-08-13T10:37:50.245790271+06:00","level":"INFO","msg":"handler: started","stream_id":"r7t5dhbx"}
+{"time":"2026-08-13T10:37:50.830343658+06:00","level":"INFO","msg":"Starting system monitor"}
+{"time":"2026-08-13T10:37:50.837594806+06:00","level":"ERROR","msg":"error getting latest commit","error":"exit status 128"}
+{"time":"2026-08-13T10:38:12.92231963+06:00","level":"INFO","msg":"tensorboard: no root directory after 10 seconds, using working directory"}
+{"time":"2026-08-13T10:38:31.675152651+06:00","level":"INFO","msg":"stream: closing","id":"r7t5dhbx"}
+{"time":"2026-08-13T10:38:31.675178568+06:00","level":"INFO","msg":"Stopping system monitor"}
+{"time":"2026-08-13T10:38:31.676375914+06:00","level":"INFO","msg":"Stopped system monitor"}
+{"time":"2026-08-13T10:38:37.577926083+06:00","level":"INFO","msg":"fileTransfer: Close: file transfer manager closed"}
+{"time":"2026-08-13T10:38:38.507996388+06:00","level":"INFO","msg":"handler: closed","stream_id":"r7t5dhbx"}
+{"time":"2026-08-13T10:38:38.508038811+06:00","level":"INFO","msg":"writer: Close: closed","stream_id":"r7t5dhbx"}
+{"time":"2026-08-13T10:38:38.508107732+06:00","level":"INFO","msg":"sender: closed","stream_id":"r7t5dhbx"}
+{"time":"2026-08-13T10:38:38.508113008+06:00","level":"INFO","msg":"stream: closed","id":"r7t5dhbx"}

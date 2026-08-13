@@ -1,0 +1,186 @@
+_current_progress_remaining:
+    value: 1
+_custom_logger:
+    value: "False"
+_episode_num:
+    value: 0
+_last_episode_starts:
+    value: '[ True  True  True  True  True  True  True  True]'
+_last_obs:
+    value: |-
+        [[1.         0.         0.25884858 0.9659179  1.         0.
+          1.         0.         0.         1.         0.         1.
+          0.         0.         1.         0.         1.         0.
+          0.         1.         0.         1.         0.         0.
+          1.         0.         1.         0.         0.        ]
+         [1.         0.         0.25884858 0.9659179  0.06800003 0.
+          0.2821028  0.25884858 0.9659179  0.5773096  0.         0.5798207
+          0.25884858 0.9659179  1.         0.         1.         0.
+          0.         1.         0.         1.         0.         0.
+          1.         0.         1.         0.         0.        ]
+         [1.         0.         0.25884858 0.9659179  0.44362918 0.
+          0.52163255 0.25884858 0.9659179  1.         0.         1.
+          0.         0.         1.         0.         1.         0.
+          0.         1.         0.         1.         0.         0.
+          1.         0.         1.         0.         0.        ]
+         [1.         0.         0.25884858 0.9659179  0.5173588  0.
+          0.55333245 0.25884858 0.9659179  1.         0.         1.
+          0.         0.         1.         0.         1.         0.
+          0.         1.         0.         1.         0.         0.
+          1.         0.         1.         0.         0.        ]
+         [1.         0.         0.25884858 0.9659179  1.         0.
+          1.         0.         0.         1.         0.         1.
+          0.         0.         1.         0.         1.         0.
+          0.         1.         0.         1.         0.         0.
+          1.         0.         1.         0.         0.        ]
+         [1.         0.         0.25884858 0.9659179  0.5990855  0.
+          0.5903459  0.25884858 0.9659179  1.         0.         1.
+          0.         0.         1.         0.         1.         0.
+          0.         1.         0.         1.         0.         0.
+          1.         0.         1.         0.         0.        ]
+         [1.         0.         0.25884858 0.9659179  0.06411927 0.
+          0.2808802  0.25884858 0.9659179  0.6858236  0.         0.6255725
+          0.25884858 0.9659179  1.         0.         1.         0.
+          0.         1.         0.         1.         0.         0.
+          1.         0.         1.         0.         0.        ]
+         [1.         0.         0.25884858 0.9659179  0.24458157 0.
+          0.41353953 0.25884858 0.9659179  1.         0.         1.
+          0.         0.         1.         0.         1.         0.
+          0.         1.         0.         1.         0.         0.
+          1.         0.         1.         0.         0.        ]]
+_last_original_obs:
+    value: None
+_logger:
+    value: <stable_baselines3.common.logger.Logger object at 0x7fd9ecfe8b38>
+_n_updates:
+    value: 0
+_num_timesteps_at_start:
+    value: 0
+_stats_window_size:
+    value: 100
+_total_timesteps:
+    value: 1500000
+_vec_normalize_env:
+    value: None
+_wandb:
+    value:
+        cli_version: 0.18.7
+        code_path: code/src/configs/v0_1_single_agent.py
+        m: []
+        python_version: 3.7.3
+        t:
+            "1":
+                - 1
+                - 55
+            "2":
+                - 1
+                - 55
+            "3":
+                - 13
+                - 22
+                - 23
+                - 35
+                - 55
+            "4": 3.7.3
+            "5": 0.18.7
+            "8":
+                - 5
+            "12": 0.18.7
+            "13": linux-x86_64
+action_noise:
+    value: None
+action_space:
+    value: Discrete(5)
+algo:
+    value: DualHeadPPO
+batch_size:
+    value: 256
+clip_range:
+    value: <function constant_fn.<locals>.func at 0x7fd9ecffbb70>
+clip_range_vf:
+    value: None
+device:
+    value: cpu
+ent_coef:
+    value: 0.01
+env:
+    value: <stable_baselines3.common.vec_env.subproc_vec_env.SubprocVecEnv object at 0x7fd9ed32fdd8>
+ep_info_buffer:
+    value: deque([], maxlen=100)
+ep_success_buffer:
+    value: deque([], maxlen=100)
+gae_lambda:
+    value: 0.95
+gamma:
+    value: 0.9
+gamma_long:
+    value: 0.99
+learning_rate:
+    value: <function linear_schedule_with_floor.<locals>.func at 0x7fd9ed02aa60>
+lr_schedule:
+    value: <function linear_schedule_with_floor.<locals>.func at 0x7fd9ed02aa60>
+max_grad_norm:
+    value: 0.5
+n_envs:
+    value: 8
+n_epochs:
+    value: 10
+n_steps:
+    value: 1024
+normalize_advantage:
+    value: "True"
+num_timesteps:
+    value: 0
+observation_space:
+    value: Box(-1.0, 1.0, (29,), float32)
+policy:
+    value: |-
+        DualHeadActorCriticPolicy(
+          (features_extractor): FlattenExtractor(
+            (flatten): Flatten(start_dim=1, end_dim=-1)
+          )
+          (pi_features_extractor): FlattenExtractor(
+            (flatten): Flatten(start_dim=1, end_dim=-1)
+          )
+          (vf_features_extractor): FlattenExtractor(
+            (flatten): Flatten(start_dim=1, end_dim=-1)
+          )
+          (mlp_extractor): MlpExtractor(
+            (policy_net): Sequential(
+              (0): Linear(in_features=29, out_features=64, bias=True)
+              (1): Tanh()
+              (2): Linear(in_features=64, out_features=64, bias=True)
+              (3): Tanh()
+            )
+            (value_net): Sequential(
+              (0): Linear(in_features=29, out_features=64, bias=True)
+              (1): Tanh()
+              (2): Linear(in_features=64, out_features=64, bias=True)
+              (3): Tanh()
+            )
+          )
+          (action_net): Linear(in_features=64, out_features=5, bias=True)
+          (value_net): Linear(in_features=64, out_features=2, bias=True)
+        )
+policy_class:
+    value: <class 'src.models.multi_discount_ppo.DualHeadActorCriticPolicy'>
+policy_kwargs:
+    value: '{}'
+rollout_buffer:
+    value: <src.models.multi_discount_ppo.MultiDiscountRolloutBuffer object at 0x7fd9ecfe8898>
+sde_sample_freq:
+    value: -1
+seed:
+    value: None
+start_time:
+    value: 1786595881513298630
+target_kl:
+    value: None
+tensorboard_log:
+    value: /home/rgb/Desktop/research/frenet_sa _multi_discount/tensorboard_logs/v0_1_/heuristic_discrete/flow_ppo_20260813_103748
+use_sde:
+    value: "False"
+verbose:
+    value: 1
+vf_coef:
+    value: 0.5

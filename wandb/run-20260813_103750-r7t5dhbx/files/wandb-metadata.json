@@ -1,0 +1,51 @@
+{
+  "os": "Linux-7.0.10-arch1-1-x86_64-with-arch",
+  "python": "3.7.3",
+  "startedAt": "2026-08-13T04:37:50.139147Z",
+  "args": [
+    "--train"
+  ],
+  "program": "src/configs/v0_1_single_agent.py",
+  "codePath": "src/configs/v0_1_single_agent.py",
+  "git": {
+    "remote": "https://github.com/ibrahimamam1/md_aim",
+    "commit": "981e6412ea38a148b016e3b53db854dcc6098718"
+  },
+  "email": "ibrahimamamoudou42@gmail.com",
+  "root": "/home/rgb/Desktop/research/frenet_sa _multi_discount",
+  "host": "atom",
+  "username": "rgb",
+  "executable": "/home/rgb/miniconda3/envs/flow/bin/python",
+  "codePathLocal": "src/configs/v0_1_single_agent.py",
+  "cpu_count": 4,
+  "cpu_count_logical": 8,
+  "gpu_count": 1,
+  "disk": {
+    "/": {
+      "total": "498165014528",
+      "used": "438118207488"
+    }
+  },
+  "memory": {
+    "total": "24964202496"
+  },
+  "cpu": {
+    "count": 4,
+    "countLogical": 8
+  },
+  "gpu_amd": [
+    {
+      "id": "0x6fdf",
+      "uniqueId": "0x0",
+      "vbiosVersion": "xxx-xxx-xxx",
+      "performanceLevel": "auto",
+      "gpuOverdrive": "0",
+      "gpuMemoryOverdrive": "0",
+      "maxPower": "110.0",
+      "series": "AMD Radeon RX 580 2048SP",
+      "model": "0x6fdf",
+      "vendor": "Advanced Micro Devices, Inc. [AMD/ATI]",
+      "sku": "xxx"
+    }
+  ]
+}

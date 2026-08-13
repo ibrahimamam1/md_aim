@@ -1,0 +1,38 @@
+Using cpu device
+Logging to /home/rgb/Desktop/research/frenet_sa _multi_discount/tensorboard_logs/v0_1_/heuristic_discrete/flow_ppo_20260813_103748/PPO_1
+---------------------------------
+| custom_metrics/    |          |
+|    avg_speed       | 0.913    |
+|    collision       | 0        |
+|    success         | 1        |
+| rollout/           |          |
+|    ep_len_mean     | 436      |
+|    ep_rew_mean     | -5.16    |
+| time/              |          |
+|    fps             | 271      |
+|    iterations      | 1        |
+|    time_elapsed    | 30       |
+|    total_timesteps | 8192     |
+---------------------------------
+Traceback (most recent call last):
+  File "src/configs/v0_1_single_agent.py", line 477, in <module>
+    train()
+  File "src/configs/v0_1_single_agent.py", line 359, in train
+    progress_bar=True
+  File
+"/home/rgb/miniconda3/envs/flow/lib/python3.7/site-packages/stable_baselines3/pp
+o/ppo.py", line 314, in learn
+    progress_bar=progress_bar,
+  File
+"/home/rgb/miniconda3/envs/flow/lib/python3.7/site-packages/stable_baselines3/co
+mmon/on_policy_algorithm.py", line 281, in learn
+    self.train()
+  File
+"/home/rgb/miniconda3/envs/flow/lib/python3.7/site-packages/stable_baselines3/pp
+o/ppo.py", line 200, in train
+    for rollout_data in self.rollout_buffer.get(self.batch_size):
+  File
+"/home/rgb/miniconda3/envs/flow/lib/python3.7/site-packages/stable_baselines3/co
+mmon/buffers.py", line 468, in get
+    self.__dict__[tensor] = self.swap_and_flatten(self.__dict__[tensor])
+KeyError: 'returns'

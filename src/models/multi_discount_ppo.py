@@ -47,9 +47,8 @@ class MultiDiscountRolloutBuffer(RolloutBuffer):
         self.rewards_short = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
         self.rewards_long = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
         
-        # Two return streams
-        self.returns_short = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
-        self.returns_long = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
+        # Two return streams stored in a single (buffer_size, n_envs, 2) tensor
+        self.returns = np.zeros((self.buffer_size, self.n_envs, 2), dtype=np.float32)
         
         # Two value streams (from the dual head)
         self.values = np.zeros((self.buffer_size, self.n_envs, 2), dtype=np.float32)
@@ -128,8 +127,8 @@ class MultiDiscountRolloutBuffer(RolloutBuffer):
             last_gae_lam_long = delta_long + self.gamma_long * self.gae_lambda * next_non_terminal * last_gae_lam_long
             
             # Store returns and total advantages
-            self.returns_short[step] = last_gae_lam_short + self.values[step, :, 0]
-            self.returns_long[step] = last_gae_lam_long + self.values[step, :, 1]
+            self.returns[step, :, 0] = last_gae_lam_short + self.values[step, :, 0]
+            self.returns[step, :, 1] = last_gae_lam_long + self.values[step, :, 1]
             
             self.advantages[step] = last_gae_lam_short + last_gae_lam_long
 
@@ -138,8 +137,8 @@ class MultiDiscountRolloutBuffer(RolloutBuffer):
         # when we flatten, (batch_size, 2) becomes (batch_size * 2)
         # This will perfectly align for F.mse_loss in PPO.train!
         
-        # Combine returns_short and returns_long into (batch_size, 2)
-        returns = np.stack([self.returns_short[batch_inds], self.returns_long[batch_inds]], axis=-1)
+        # Combined returns and values are shaped (buffer_size * n_envs, 2) due to SB3 get()
+        # We flatten them to (batch_size * 2) so PPO MSE Loss works automatically
         
         data = (
             self.observations[batch_inds],
@@ -147,7 +146,7 @@ class MultiDiscountRolloutBuffer(RolloutBuffer):
             self.values[batch_inds].flatten(),   # (batch_size * 2,)
             self.log_probs[batch_inds],
             self.advantages[batch_inds],
-            returns.flatten(),                   # (batch_size * 2,)
+            self.returns[batch_inds].flatten(),                  # (batch_size * 2,)
         )
         return RolloutBufferSamples(*tuple(map(self.to_torch, data)))
 
