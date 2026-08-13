@@ -218,7 +218,8 @@ def _load_csvs(
     """
     data: dict = defaultdict(lambda: defaultdict(list))
     profiles_by_version: dict = defaultdict(lambda: {
-        "times": [], "distances": [], "velocities": [], "jerks": [], "jerk_times": [], "accelerations": []
+        "distances": [], "velocities": [], "jerks": [], "accelerations": [],
+        "episodes": [],
     })
     parsed_files = []
 
@@ -258,8 +259,18 @@ def _load_csvs(
             reader = csv.DictReader(f)
             for row in reader:
                 try:
-                    collisions.append(int(row["collision"]))
-                    travel_times.append(float(row["travel_time"]))
+                    if "collision_rate" in row and row["collision_rate"] != "":
+                        col = float(row["collision_rate"])
+                    elif "total_vehicles_spawned" in row and int(row.get("total_vehicles_spawned", 0)) > 0:
+                        tot_col = float(row.get("total_collisions", row.get("collision", 0)))
+                        tot_veh = float(row["total_vehicles_spawned"])
+                        col = tot_col / tot_veh
+                    else:
+                        col = float(row.get("collision", 0))
+
+                    tt = float(row.get("all_vehicles_avg_travel_time", row["travel_time"]))
+                    collisions.append(col)
+                    travel_times.append(tt)
                     waiting_times.append(float(row.get("waiting_time", 0.0)))
                 except (KeyError, ValueError):
                     continue
@@ -267,18 +278,27 @@ def _load_csvs(
                 t_arr = _parse_profile_str(row.get("time_profile", ""))
                 d_arr = _parse_profile_str(row.get("distance_profile", ""))
                 v_arr = _parse_profile_str(row.get("velocity_profile", ""))
+                j_arr = _parse_profile_str(row.get("jerk_profile", ""))
                 a_arr = _parse_profile_str(row.get("acceleration_profile", ""))
+                ep_collision = int(row.get("collision", 0))
 
-                if len(t_arr) > 0 and len(v_arr) == len(t_arr):
-                    profiles_by_version[version]["times"].extend(t_arr)
-                    profiles_by_version[version]["velocities"].extend(v_arr)
-                    if len(v_arr) > 1:
-                        profiles_by_version[version]["jerk_times"].extend(t_arr[1:])
-                        profiles_by_version[version]["jerks"].extend(np.diff(v_arr))
                 if len(d_arr) > 0 and len(v_arr) == len(d_arr):
                     profiles_by_version[version]["distances"].extend(d_arr)
+                    profiles_by_version[version]["velocities"].extend(v_arr)
+                if len(j_arr) > 0:
+                    profiles_by_version[version]["jerks"].extend(j_arr)
                 if len(t_arr) > 0 and len(a_arr) == len(t_arr):
                     profiles_by_version[version]["accelerations"].extend(a_arr)
+
+                # Per-episode data for sampled/worst-case plots
+                if len(d_arr) > 1 and len(v_arr) == len(d_arr):
+                    profiles_by_version[version]["episodes"].append({
+                        "distances": d_arr,
+                        "velocities": v_arr,
+                        "jerks": j_arr if len(j_arr) == len(d_arr) else np.zeros_like(d_arr),
+                        "scenario": rate_key,
+                        "collision": ep_collision,
+                    })
 
         if not collisions:
             continue
@@ -394,8 +414,10 @@ def _make_profile_scatter(
         x_data = np.asarray(profiles_by_version.get(ver, {}).get(x_key, []), dtype=float)
         y_data = np.asarray(profiles_by_version.get(ver, {}).get(y_key, []), dtype=float)
 
-        if len(x_data) == 0 or len(y_data) == 0 or len(x_data) != len(y_data):
+        n = min(len(x_data), len(y_data))
+        if n == 0:
             continue
+        x_data, y_data = x_data[:n], y_data[:n]
 
         valid = np.isfinite(x_data) & np.isfinite(y_data)
         x_data = x_data[valid]
@@ -470,6 +492,50 @@ def _make_profile_scatter(
         )
 
 
+def _plot_worst_case_on_ax(
+    ax: plt.Axes,
+    profiles_by_version: dict,
+    versions: list[str],
+) -> None:
+    """
+    Identify the worst-case episode per version and plot its velocity vs distance.
+    Worst-case = collision episode with lowest avg speed, or lowest avg speed overall.
+    """
+    has_data = False
+    for i, ver in enumerate(versions):
+        episodes = profiles_by_version.get(ver, {}).get("episodes", [])
+        if not episodes:
+            continue
+
+        # Worst-case: lowest avg speed among non-collision episodes only
+        safe_eps = [ep for ep in episodes if ep.get("collision", 0) == 0]
+        if not safe_eps:
+            continue
+        worst = min(safe_eps, key=lambda ep: np.mean(ep["velocities"]))
+
+        color, label = get_version_style(ver, i)
+        sc_label = SCENARIO_LABELS.get(worst["scenario"], worst["scenario"]).replace("\n", " ")
+
+        ax.plot(worst["distances"], worst["velocities"], color=color, linewidth=1.8,
+                alpha=0.85, label=f"{label} [{sc_label}]", zorder=3)
+        has_data = True
+
+    ax.set_xlabel("Distance (m)", fontsize=AXIS_FONTSIZE)
+    ax.set_ylabel("Velocity (m/s)", fontsize=AXIS_FONTSIZE)
+    ax.set_title("Worst-Case Velocity Profile", fontsize=TITLE_FONTSIZE, fontweight="bold", pad=10)
+    ax.grid(True, linestyle="--", alpha=0.35, zorder=0)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    if has_data:
+        ax.legend(loc="best", frameon=False, fontsize=7)
+    else:
+        ax.text(0.5, 0.5, "No episode data available",
+                ha="center", va="center", transform=ax.transAxes,
+                fontsize=AXIS_FONTSIZE, color="gray", style="italic")
+
+
+
+
 def plot_eval_results(
     output_dir: str = "output",
     version_filter: Optional[str] = None,
@@ -537,14 +603,14 @@ def plot_eval_results(
 
     fig, axes = plt.subplots(2, 3, figsize=FIGSIZE)
     fig.suptitle(
-        f"Evaluation Results & Velocity/Velocity Difference Profiles{title_suffix}",
+        f"Evaluation Results & Profile Analysis{title_suffix}",
         fontsize=TITLE_FONTSIZE + 2,
         fontweight="bold",
         y=0.98,
     )
 
     ax_col, ax_tt, ax_wt = axes[0, 0], axes[0, 1], axes[0, 2]
-    ax_vt, ax_vd, ax_jt = axes[1, 0], axes[1, 1], axes[1, 2]
+    ax_vd, ax_jd, ax_worst = axes[1, 0], axes[1, 1], axes[1, 2]
 
     _make_grouped_bar(
         ax=ax_col,
@@ -579,17 +645,7 @@ def plot_eval_results(
         title="Average Waiting Time by Scenario & Controller",
     )
 
-    # Plot profile scatter charts on bottom row
-    _make_profile_scatter(
-        ax_vt,
-        profiles_by_version,
-        versions,
-        "times",
-        "velocities",
-        "Time (s)",
-        "Velocity (m/s)",
-        "Velocity Profile vs. Time",
-    )
+    # Plot profile scatter charts on bottom row — distance-based only
     _make_profile_scatter(
         ax_vd,
         profiles_by_version,
@@ -601,15 +657,18 @@ def plot_eval_results(
         "Velocity Profile vs. Distance",
     )
     _make_profile_scatter(
-        ax_jt,
+        ax_jd,
         profiles_by_version,
         versions,
-        "jerk_times",
+        "distances",
         "jerks",
-        "Time (s)",
-        "ΔVelocity (m/s)",
-        "Velocity Difference vs. Time",
+        "Distance (m)",
+        "Jerk (m/s\u00b3)",
+        "Jerk Profile vs. Distance",
     )
+
+    # Worst-case velocity episode on the third bottom panel
+    _plot_worst_case_on_ax(ax_worst, profiles_by_version, versions)
 
     # Shared legend below all charts
     handles = [
@@ -636,28 +695,25 @@ def plot_eval_results(
         fig.savefig(save_path, dpi=150, bbox_inches="tight")
         print(f"[plot] Saved combined dashboard → {save_path}")
 
-        # Also save a dedicated standalone figure for the three profile scatter plots
+        # Also save a dedicated standalone figure for the profile scatter plots
         base, ext = os.path.splitext(save_path)
         scatter_save_path = f"{base}_profiles_scatter{ext}"
         fig_scat, ax_scat = plt.subplots(1, 3, figsize=(18, 5))
         fig_scat.suptitle(
-            f"Velocity & Velocity Difference Profile Scatters{title_suffix}",
+            f"Velocity & Jerk Profile Analysis{title_suffix}",
             fontsize=TITLE_FONTSIZE + 2,
             fontweight="bold",
             y=1.03,
         )
         _make_profile_scatter(
-            ax_scat[0], profiles_by_version, versions, "times", "velocities",
-            "Time (s)", "Velocity (m/s)", "Velocity Profile vs. Time"
-        )
-        _make_profile_scatter(
-            ax_scat[1], profiles_by_version, versions, "distances", "velocities",
+            ax_scat[0], profiles_by_version, versions, "distances", "velocities",
             "Distance (m)", "Velocity (m/s)", "Velocity Profile vs. Distance"
         )
         _make_profile_scatter(
-            ax_scat[2], profiles_by_version, versions, "jerk_times", "jerks",
-            "Time (s)", "ΔVelocity (m/s)", "Velocity Difference vs. Time"
+            ax_scat[1], profiles_by_version, versions, "distances", "jerks",
+            "Distance (m)", "Jerk (m/s\u00b3)", "Jerk Profile vs. Distance"
         )
+        _plot_worst_case_on_ax(ax_scat[2], profiles_by_version, versions)
         fig_scat.legend(
             handles=handles,
             loc="lower center",

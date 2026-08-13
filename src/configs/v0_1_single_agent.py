@@ -32,6 +32,8 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv
 from stable_baselines3.common.monitor import Monitor
+import wandb
+from wandb.integration.sb3 import WandbCallback
 
 IDM_acceleration_controller = IDMController
 RL_vehicle_acceleration_controller = RLController
@@ -123,7 +125,7 @@ root_dir        = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspat
 output_file_dir = os.path.join(root_dir, "results")
 net_file_dir    = os.path.join(root_dir, "networks")
 
-net_file_name = "100m_right_before_left.net.xml"
+net_file_name = "100m_skewed_right_before_left.net.xml"
 net_file= os.path.join(net_file_dir, net_file_name)
 
 net_params = NetParams(osm_path=None, template=net_file, inflows=inflow)
@@ -259,12 +261,21 @@ TENSORBOARD_RUN_DIR = os.path.join(TENSORBOARD_DIR, RUN_NAME)
 
 
 from src.models.attention_model import AttentionFeatureExtractor
+from src.models.multi_discount_ppo import DualHeadPPO, DualHeadActorCriticPolicy
 
 def train():
     os.makedirs(CHECKPOINT_ROOT, exist_ok=True)
     
     print(f"\n--- TRAINING START (Discrete - SB3) ---")
     print(f"TensorBoard → {TENSORBOARD_RUN_DIR}")
+    
+    run = wandb.init(
+        project="alpha-env",
+        name=RUN_NAME,
+        sync_tensorboard=True,
+        monitor_gym=False,
+        save_code=True,
+    )
     
     num_workers = 8
     n_steps = 1024 
@@ -294,15 +305,16 @@ def train():
 
     vec_env = SubprocVecEnv([make_env for _ in range(num_workers)])
 
-    model = PPO(
-        policy="MlpPolicy",
+    model = DualHeadPPO(
+        policy=DualHeadActorCriticPolicy,
         env=vec_env,
         policy_kwargs=policy_kwargs,
         learning_rate=linear_schedule_with_floor(3e-4, 1e-5),
         n_steps=n_steps,
         batch_size=256,
         n_epochs=10,
-        gamma=0.98,
+        gamma=0.90,
+        gamma_long=0.99,
         gae_lambda=0.95,
         clip_range=0.25,
         max_grad_norm=0.5,
@@ -314,7 +326,7 @@ def train():
     # Train
     model.learn(
         total_timesteps=total_timesteps, 
-        callback=TrafficCallback(),
+        callback=[TrafficCallback(), WandbCallback(model_save_path=CHECKPOINT_ROOT)],
         progress_bar=True
     )
 
@@ -326,6 +338,7 @@ def train():
     print(f"Saved Model  → {final_model_path}.zip")
     print(f"TensorBoard → {TENSORBOARD_RUN_DIR}")
     
+    run.finish()
 
     vec_env.close()
 
@@ -398,7 +411,7 @@ def evaluate(checkpoint_path: str, num_iterations: int = 20):
     print(f"Loaded checkpoint: {checkpoint_path}")
 
     eval_env = DummyVecEnv([lambda: create_flow_env({"render": True})])
-    model = PPO.load(checkpoint_path, env=eval_env)
+    model = DualHeadPPO.load(checkpoint_path, env=eval_env)
 
     rewards = []
     for episode in range(num_iterations):

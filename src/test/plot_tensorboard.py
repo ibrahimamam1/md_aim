@@ -75,7 +75,12 @@ def _agent_style(name: str, idx: int):
         return AGENT_META[name]
     color = _FALLBACK_COLORS[idx % len(_FALLBACK_COLORS)]
     marker = _FALLBACK_MARKERS[idx % len(_FALLBACK_MARKERS)]
-    label = name.replace("_", " ").title()
+    if name.startswith("gamma_"):
+        val = name.replace("gamma_", "").replace("_", ".")
+        label = f"\u03b3 = {val}"
+    else:
+        label = name.replace("_", " ").title()
+        
     return label, color, "-", marker
 
 
@@ -266,7 +271,7 @@ def main():
         "--logdir",
         default=None,
         help="Root directory containing agent subdirectories "
-             "(default: <project>/tensorboard_logs/v0_1_).",
+             "(default: <project>/tensorboard_logs).",
     )
     parser.add_argument(
         "--output_dir",
@@ -285,7 +290,7 @@ def main():
         os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     )
 
-    base_dir = args.logdir or os.path.join(project_root, "tensorboard_logs", "v0_1_")
+    base_dir = args.logdir or os.path.join(project_root, "tensorboard_logs")
     output_dir = args.output_dir or os.path.join(project_root, "plots", "training")
 
     if not os.path.isdir(base_dir):

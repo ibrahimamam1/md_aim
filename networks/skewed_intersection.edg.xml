@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Edge definitions for the skewed intersection.
+     Incoming edges: far node → X  (long, ~88m)
+     Outgoing edges: X → stub node (short, ~20m)
+     Same IDs as the original 100m_right_before_left network.
+-->
+<edges>
+    <!-- Incoming edges (toward intersection X) — from far nodes -->
+    <edge id="E#T-X" from="Top"   to="X"        numLanes="1" speed="13.89" priority="-1"/>
+    <edge id="E#R-X" from="Right" to="X"        numLanes="1" speed="13.89" priority="-1"/>
+    <edge id="E#D-X" from="Down"  to="X"        numLanes="1" speed="13.89" priority="-1"/>
+    <edge id="E#L-X" from="Left"  to="X"        numLanes="1" speed="13.89" priority="-1"/>
+
+    <!-- Outgoing edges (from intersection X) — to nearby stub nodes -->
+    <edge id="E#X-T" from="X" to="TopOut"   numLanes="1" speed="13.89" priority="-1"/>
+    <edge id="E#X-R" from="X" to="RightOut" numLanes="1" speed="13.89" priority="-1"/>
+    <edge id="E#X-D" from="X" to="DownOut"  numLanes="1" speed="13.89" priority="-1"/>
+    <edge id="E#X-L" from="X" to="LeftOut"  numLanes="1" speed="13.89" priority="-1"/>
+</edges>

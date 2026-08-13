@@ -17,7 +17,7 @@ class AlphaEnv_v01(Env_N):
         self.prev_pos = dict()
         self.absolute_position = dict()
         self.max_neighbours = 5
-        self.perception_radius = 100
+        self.perception_radius = 50
        
         # Ego-centric observation: S_ego = [d_norm, v_norm, cos θ, sin θ]
         self.ego_obs_features = 4

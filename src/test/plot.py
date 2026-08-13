@@ -247,6 +247,25 @@ def parse_filename(path: str):
     # What remains should be the intention
     intention = name.strip("_") if name.strip("_") in INTENTIONS else None
 
+    # Handle subdirectories (gamma)
+    parent_dir = os.path.basename(os.path.dirname(path))
+    if parent_dir.startswith("gamma_"):
+        base_controller = controller
+        controller = f"{base_controller}_{parent_dir}"
+        
+        if controller not in CONTROLLERS:
+            base_label = CONTROLLERS[base_controller]
+            gamma_val = parent_dir.replace("gamma_", "").replace("_", ".")
+            CONTROLLERS[controller] = f"{base_label} (\u03b3={gamma_val})"
+            
+            # Use fallback colors for variety
+            idx = len(CONTROLLERS)
+            import matplotlib.pyplot as plt
+            cmap = plt.get_cmap("tab20")
+            CONTROLLER_COLORS[controller] = matplotlib.colors.rgb2hex(cmap(idx % 20))
+            CONTROLLER_MARKERS[controller] = CONTROLLER_MARKERS.get(base_controller, "o")
+            CONTROLLER_LINESTYLES[controller] = CONTROLLER_LINESTYLES.get(base_controller, "-")
+
     return {
         "intention":  intention,
         "scenario":   scenario,
@@ -263,9 +282,9 @@ def load_data(data_dir: str) -> pd.DataFrame:
     Returns a DataFrame with columns:
         intention, scenario, controller, collision_rate, travel_time_mean
     """
-    csv_files = glob(os.path.join(data_dir, "*.csv"))
+    csv_files = glob(os.path.join(data_dir, "**", "*.csv"), recursive=True)
     if not csv_files:
-        raise FileNotFoundError(f"No CSV files found in: {data_dir}")
+        raise FileNotFoundError(f"No CSV files found recursively in: {data_dir}")
 
     records = []
     for path in csv_files:
@@ -339,57 +358,85 @@ def parse_profile_str(val: str) -> np.ndarray:
 
 def load_profiles(data_dir: str) -> dict:
     """
-    Load profile telemetry (times, distances, velocities, jerks) from CSV files in *data_dir*,
-    grouped by controller.
+    Load profile telemetry (distances, velocities, jerks, accelerations) from CSV files
+    in *data_dir*, grouped by controller.
+
+    Returns a dict keyed by controller with:
+      - distances, velocities, jerks, accelerations: flat arrays (for scatter/aggregate plots)
+      - episodes: list of per-episode dicts with distances, velocities, jerks, scenario, collision
     """
-    csv_files = glob(os.path.join(data_dir, "*.csv"))
-    profiles = {ctrl: {"times": [], "distances": [], "velocities": [], "jerks": [], "jerk_times": [], "accelerations": []} for ctrl in CONTROLLERS}
+    csv_files = glob(os.path.join(data_dir, "**", "*.csv"), recursive=True)
+    profiles = {
+        ctrl: {
+            "distances": [], "velocities": [], "jerks": [], "accelerations": [],
+            "episodes": [],
+        }
+        for ctrl in CONTROLLERS
+    }
 
     for path in csv_files:
         meta = parse_filename(path)
         if meta is None or meta["controller"] not in profiles:
             continue
         ctrl = meta["controller"]
+        scenario = meta.get("scenario", "unknown")
         try:
             df = pd.read_csv(path)
         except Exception:
             continue
 
         for _, row in df.iterrows():
-            t_arr = parse_profile_str(row.get("time_profile", ""))
             d_arr = parse_profile_str(row.get("distance_profile", ""))
             v_arr = parse_profile_str(row.get("velocity_profile", ""))
+            j_arr = parse_profile_str(row.get("jerk_profile", ""))
             a_arr = parse_profile_str(row.get("acceleration_profile", ""))
+            collision = int(row.get("collision", 0)) if "collision" in row.index else 0
 
-            if len(t_arr) > 0 and len(v_arr) == len(t_arr):
-                profiles[ctrl]["times"].extend(t_arr)
-                profiles[ctrl]["velocities"].extend(v_arr)
-                if len(v_arr) > 1:
-                    profiles[ctrl]["jerk_times"].extend(t_arr[1:])
-                    profiles[ctrl]["jerks"].extend(np.diff(v_arr))
             if len(d_arr) > 0 and len(v_arr) == len(d_arr):
                 profiles[ctrl]["distances"].extend(d_arr)
-            if len(t_arr) > 0 and len(a_arr) == len(t_arr):
+                profiles[ctrl]["velocities"].extend(v_arr)
+
+            if len(j_arr) > 0:
+                profiles[ctrl]["jerks"].extend(j_arr)
+            if len(a_arr) > 0:
                 profiles[ctrl]["accelerations"].extend(a_arr)
+
+            # Store per-episode data for per-scenario and worst-case plots
+            if len(d_arr) > 1 and len(v_arr) == len(d_arr):
+                ep = {
+                    "distances": d_arr,
+                    "velocities": v_arr,
+                    "jerks": j_arr if len(j_arr) == len(d_arr) else np.zeros_like(d_arr),
+                    "scenario": scenario,
+                    "collision": collision,
+                }
+                profiles[ctrl]["episodes"].append(ep)
 
     return profiles
 
 
 def plot_profile_scatters(profiles: dict, output_dir: str):
     """
-    Plot academic-quality scatter plots of velocity profile with time, velocity profile with distance,
-    and jerk profile with time across various controllers.
+    Plot academic-quality scatter plots of:
+      - Velocity profile vs. Distance
+      - Jerk profile vs. Distance
+      - Per-scenario sampled episode velocity & jerk curves
+      - Worst-case episode velocity profile
     """
     os.makedirs(output_dir, exist_ok=True)
-    controllers = [c for c in CONTROLLERS.keys() if c in profiles and any(len(profiles[c][k]) > 0 for k in profiles[c])]
+    controllers = [c for c in CONTROLLERS.keys() if c in profiles and any(
+        len(profiles[c].get(k, [])) > 0 for k in ["distances", "velocities", "jerks"]
+    )]
 
     def _draw_scatter(ax, x_key, y_key, xlabel, ylabel, title, max_pts=2500):
         has_data = False
         for c in controllers:
             x_data = np.asarray(profiles[c].get(x_key, []), dtype=float)
             y_data = np.asarray(profiles[c].get(y_key, []), dtype=float)
-            if len(x_data) == 0 or len(y_data) == 0 or len(x_data) != len(y_data):
+            n = min(len(x_data), len(y_data))
+            if n == 0:
                 continue
+            x_data, y_data = x_data[:n], y_data[:n]
             valid = np.isfinite(x_data) & np.isfinite(y_data)
             x_data, y_data = x_data[valid], y_data[valid]
             if len(x_data) == 0:
@@ -431,36 +478,167 @@ def plot_profile_scatters(profiles: dict, output_dir: str):
             ax.text(0.5, 0.5, "No profile telemetry found\n(Re-run evaluation to record profiles)",
                     ha="center", va="center", transform=ax.transAxes, fontsize=10, color="gray", style="italic")
 
-    # 1. Individual figures
-    configs = [
-        ("times", "velocities", "Time (s)", "Velocity (m/s)", "Velocity Profile vs. Time", "fig5_velocity_vs_time_scatter"),
-        ("distances", "velocities", "Distance (m)", "Velocity (m/s)", "Velocity Profile vs. Distance", "fig6_velocity_vs_distance_scatter"),
-        ("jerk_times", "jerks", "Time (s)", "ΔVelocity (m/s)", "Velocity Difference vs. Time", "fig7_jerk_vs_time_scatter"),
-    ]
-    for x_key, y_key, xlabel, ylabel, title, fname in configs:
-        fig, ax = plt.subplots(1, 1, figsize=(7, 5))
-        _draw_scatter(ax, x_key, y_key, xlabel, ylabel, title)
-        handles = [mpatches.Patch(color=CONTROLLER_COLORS[c], alpha=0.88, label=CONTROLLERS[c]) for c in controllers if c in CONTROLLER_COLORS]
-        if handles:
-            ax.legend(handles=handles, loc="best", frameon=False, fontsize=9)
-        fig.tight_layout()
-        for ext in ["png", "pdf"]:
-            fig.savefig(os.path.join(output_dir, f"{fname}.{ext}"), dpi=300, bbox_inches="tight")
-        plt.close(fig)
-        print(f"  -> Saved {fname}.png/.pdf")
-
-    # 2. Combined 1x3 panel figure
-    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
-    for ax, (x_key, y_key, xlabel, ylabel, title, _) in zip(axes, configs):
-        _draw_scatter(ax, x_key, y_key, xlabel, ylabel, title)
+    # ── 1. Velocity vs Distance scatter ──────────────────────────────────────
+    fig, ax = plt.subplots(1, 1, figsize=(7, 5))
+    _draw_scatter(ax, "distances", "velocities", "Distance (m)", "Velocity (m/s)", "Velocity Profile vs. Distance")
     handles = [mpatches.Patch(color=CONTROLLER_COLORS[c], alpha=0.88, label=CONTROLLERS[c]) for c in controllers if c in CONTROLLER_COLORS]
     if handles:
-        fig.legend(handles=handles, loc="lower center", ncol=min(max(1, len(handles)), 3), frameon=False, fontsize=10, bbox_to_anchor=(0.5, -0.08))
+        ax.legend(handles=handles, loc="best", frameon=False, fontsize=9)
     fig.tight_layout()
     for ext in ["png", "pdf"]:
-        fig.savefig(os.path.join(output_dir, f"fig8_all_profiles_scatter.{ext}"), dpi=300, bbox_inches="tight")
+        fig.savefig(os.path.join(output_dir, "fig5_velocity_vs_distance_scatter." + ext), dpi=300, bbox_inches="tight")
     plt.close(fig)
-    print("  -> Saved fig8_all_profiles_scatter.png/.pdf")
+    print("  -> Saved fig5_velocity_vs_distance_scatter.png/.pdf")
+
+    # ── 2. Jerk vs Distance scatter ──────────────────────────────────────────
+    fig, ax = plt.subplots(1, 1, figsize=(7, 5))
+    _draw_scatter(ax, "distances", "jerks", "Distance (m)", "Jerk (m/s³)", "Jerk Profile vs. Distance")
+    if handles:
+        ax.legend(handles=handles, loc="best", frameon=False, fontsize=9)
+    fig.tight_layout()
+    for ext in ["png", "pdf"]:
+        fig.savefig(os.path.join(output_dir, "fig6_jerk_vs_distance_scatter." + ext), dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    print("  -> Saved fig6_jerk_vs_distance_scatter.png/.pdf")
+
+    # ── 3. Per-scenario sampled episodes: velocity & jerk vs distance ────────
+    _plot_per_scenario_episodes(profiles, controllers, output_dir)
+
+    # ── 4. Worst-case episode velocity profile ───────────────────────────────
+    _plot_worst_case_episode(profiles, controllers, output_dir)
+
+    # ── 5. Combined 1×2 panel (velocity + jerk vs distance) ──────────────────
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+    _draw_scatter(axes[0], "distances", "velocities", "Distance (m)", "Velocity (m/s)", "Velocity Profile vs. Distance")
+    _draw_scatter(axes[1], "distances", "jerks", "Distance (m)", "Jerk (m/s³)", "Jerk Profile vs. Distance")
+    if handles:
+        fig.legend(handles=handles, loc="lower center", ncol=min(max(1, len(handles)), 4), frameon=False, fontsize=10, bbox_to_anchor=(0.5, -0.08))
+    fig.tight_layout()
+    for ext in ["png", "pdf"]:
+        fig.savefig(os.path.join(output_dir, f"fig7_all_profiles_scatter.{ext}"), dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    print("  -> Saved fig7_all_profiles_scatter.png/.pdf")
+
+
+def _plot_per_scenario_episodes(profiles: dict, controllers: list, output_dir: str):
+    """
+    For each scenario, sample one random episode per controller and plot
+    velocity and jerk vs. distance as line curves.
+    """
+    # Collect all scenarios across controllers
+    all_scenarios = set()
+    for c in controllers:
+        for ep in profiles[c].get("episodes", []):
+            all_scenarios.add(ep["scenario"])
+    all_scenarios = sorted(all_scenarios, key=lambda s: SCENARIO_MEAN_FLOW.get(s, 0))
+
+    if not all_scenarios:
+        return
+
+    n_sc = len(all_scenarios)
+    fig_v, axes_v = plt.subplots(1, n_sc, figsize=(6 * n_sc, 5), squeeze=False)
+    fig_j, axes_j = plt.subplots(1, n_sc, figsize=(6 * n_sc, 5), squeeze=False)
+
+    for sc_idx, scenario in enumerate(all_scenarios):
+        ax_v = axes_v[0, sc_idx]
+        ax_j = axes_j[0, sc_idx]
+        sc_label = SCENARIO_LABELS.get(scenario, scenario).replace("\n", " ")
+
+        for c in controllers:
+            # Filter episodes for this scenario and controller
+            sc_episodes = [ep for ep in profiles[c].get("episodes", []) if ep["scenario"] == scenario]
+            if not sc_episodes:
+                continue
+
+            # Sample one random episode
+            ep = sc_episodes[np.random.randint(len(sc_episodes))]
+            color = CONTROLLER_COLORS.get(c, "#333333")
+            label = CONTROLLERS.get(c, c)
+
+            ax_v.plot(ep["distances"], ep["velocities"], color=color, linewidth=1.5,
+                      alpha=0.85, label=label, zorder=3)
+
+            j_arr = ep["jerks"]
+            d_arr = ep["distances"]
+            # Jerk array may be one shorter than distance if it's da/dt
+            if len(j_arr) == len(d_arr) - 1:
+                ax_j.plot(d_arr[1:], j_arr, color=color, linewidth=1.5,
+                          alpha=0.85, label=label, zorder=3)
+            elif len(j_arr) == len(d_arr):
+                ax_j.plot(d_arr, j_arr, color=color, linewidth=1.5,
+                          alpha=0.85, label=label, zorder=3)
+
+        for ax, ylabel, title_prefix in [
+            (ax_v, "Velocity (m/s)", "Velocity"),
+            (ax_j, "Jerk (m/s³)", "Jerk"),
+        ]:
+            ax.set_xlabel("Distance (m)", fontsize=11)
+            ax.set_ylabel(ylabel, fontsize=11)
+            ax.set_title(f"{title_prefix} — {sc_label}", fontsize=12, fontweight="bold", pad=8)
+            ax.grid(True, linestyle="--", alpha=0.35, zorder=0)
+            ax.spines["top"].set_visible(False)
+            ax.spines["right"].set_visible(False)
+            ax.legend(loc="best", frameon=False, fontsize=8)
+
+    fig_v.suptitle("Sampled Episode — Velocity Profile vs. Distance", fontsize=14, fontweight="bold", y=1.02)
+    fig_v.tight_layout()
+    for ext in ["png", "pdf"]:
+        fig_v.savefig(os.path.join(output_dir, f"fig8_per_scenario_velocity.{ext}"), dpi=300, bbox_inches="tight")
+    plt.close(fig_v)
+    print("  -> Saved fig8_per_scenario_velocity.png/.pdf")
+
+    fig_j.suptitle("Sampled Episode — Jerk Profile vs. Distance", fontsize=14, fontweight="bold", y=1.02)
+    fig_j.tight_layout()
+    for ext in ["png", "pdf"]:
+        fig_j.savefig(os.path.join(output_dir, f"fig9_per_scenario_jerk.{ext}"), dpi=300, bbox_inches="tight")
+    plt.close(fig_j)
+    print("  -> Saved fig9_per_scenario_jerk.png/.pdf")
+
+
+def _plot_worst_case_episode(profiles: dict, controllers: list, output_dir: str):
+    """
+    Identify the worst-case episode (lowest average speed among completed,
+    or a collision episode) per controller and plot its velocity profile vs distance.
+    """
+    fig, ax = plt.subplots(1, 1, figsize=(8, 5))
+    has_data = False
+
+    for c in controllers:
+        episodes = profiles[c].get("episodes", [])
+        if not episodes:
+            continue
+
+        # Worst-case: lowest avg speed among non-collision episodes only
+        safe_eps = [ep for ep in episodes if ep.get("collision", 0) == 0]
+        if not safe_eps:
+            continue
+        worst = min(safe_eps, key=lambda ep: np.mean(ep["velocities"]))
+
+        color = CONTROLLER_COLORS.get(c, "#333333")
+        label = CONTROLLERS.get(c, c)
+        sc_label = SCENARIO_LABELS.get(worst["scenario"], worst["scenario"]).replace("\n", " ")
+
+        ax.plot(worst["distances"], worst["velocities"], color=color, linewidth=1.8,
+                alpha=0.85, label=f"{label} [{sc_label}]", zorder=3)
+        has_data = True
+
+    ax.set_xlabel("Distance (m)", fontsize=11)
+    ax.set_ylabel("Velocity (m/s)", fontsize=11)
+    ax.set_title("Worst-Case Episode — Velocity Profile vs. Distance", fontsize=13, fontweight="bold", pad=10)
+    ax.grid(True, linestyle="--", alpha=0.35, zorder=0)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    if has_data:
+        ax.legend(loc="best", frameon=False, fontsize=8)
+    else:
+        ax.text(0.5, 0.5, "No episode data available",
+                ha="center", va="center", transform=ax.transAxes, fontsize=10, color="gray", style="italic")
+
+    fig.tight_layout()
+    for ext in ["png", "pdf"]:
+        fig.savefig(os.path.join(output_dir, f"fig10_worst_case_velocity.{ext}"), dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    print("  -> Saved fig10_worst_case_velocity.png/.pdf")
 
 
 # ---------------------------------------------------------------------------
@@ -502,6 +680,18 @@ def plot_summary_bars(df: pd.DataFrame, output_dir: str):
     controllers_present = [c for c in CONTROLLERS if c in df["controller"].unique()]
     if not controllers_present:
         controllers_present = sorted(df["controller"].unique())
+
+    def _gamma_sort_key(c):
+        if "_gamma_" in c:
+            try:
+                gamma_val = float(c.split("_gamma_")[-1].replace("_", "."))
+                base_ctrl = c.split("_gamma_")[0]
+                return (gamma_val, base_ctrl)
+            except ValueError:
+                pass
+        return (-1, c)
+
+    controllers_present.sort(key=_gamma_sort_key)
 
     # Reverse order so the first controller in CONTROLLERS is plotted at the top of barh
     controllers_plot = controllers_present[::-1]
@@ -858,8 +1048,8 @@ def main(results_dir: str = None, out_dir: str = None):
     print("[Fig 4] Travel-time heatmap …")
     plot_heatmap(df, "travel_time_mean", out_dir)
 
-    # ── Fig 5-8 — Profile scatter plots ──────────────────────────────────────
-    print("\n[Fig 5-8] Velocity & Velocity Difference profile scatter plots …")
+    # ── Fig 5-10 — Profile plots (distance-based, per-scenario, worst-case) ─
+    print("\n[Fig 5-10] Velocity & Jerk profile plots …")
     profiles = load_profiles(results_dir)
     plot_profile_scatters(profiles, out_dir)
 

@@ -30,8 +30,8 @@ from flow.core.params import (
 )
 from flow.controllers import RLController, IDMController
 
-# SB3 Imports
 from stable_baselines3 import PPO
+from src.models.multi_discount_ppo import DualHeadPPO
 from stable_baselines3.common.vec_env import DummyVecEnv
 
 from plot_eval_results import plot_eval_results
@@ -220,9 +220,12 @@ def main():
     print(f"Sims per scenario: {n_sims}")
     print(f"OS fd limit: {resource.getrlimit(resource.RLIMIT_NOFILE)}\n")
 
-    # ── Load model ONCE — avoids reopening the zip on every run ──────────────
     print("Loading model from checkpoint (once)...")
-    base_model = PPO.load(checkpoint_path)
+    try:
+        base_model = DualHeadPPO.load(checkpoint_path)
+    except Exception:
+        print("DualHeadPPO failed to load (likely an old checkpoint). Falling back to PPO...")
+        base_model = PPO.load(checkpoint_path)
     print("Model loaded.\n")
 
     for scen_key, scen_net_file in scenarios.items():

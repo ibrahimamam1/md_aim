@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Skewed intersection nodes.
+     Arms at 25°/120°/195°/290° instead of 0°/90°/180°/270°.
+     Far nodes at ~100m for incoming, stub nodes at ~32m for short outgoing edges.
+-->
+<nodes>
+    <!-- Central intersection -->
+    <node id="X" x="0.0" y="0.0" type="right_before_left"/>
+
+    <!-- Far endpoints for incoming edges (~100m from center) -->
+    <node id="Top"   x="-50.00"  y="86.60"  type="dead_end"/>
+    <node id="Right" x="90.63"   y="42.26"  type="dead_end"/>
+    <node id="Down"  x="34.20"   y="-93.97" type="dead_end"/>
+    <node id="Left"  x="-96.59"  y="-25.88" type="dead_end"/>
+
+    <!-- Stub endpoints for outgoing edges (~28m from center → ~20m beyond junction) -->
+    <!-- Top out:    120° -->
+    <node id="TopOut"   x="-14.00" y="24.25"  type="dead_end"/>
+    <!-- Right out:  25°  -->
+    <node id="RightOut" x="25.37"  y="11.83"  type="dead_end"/>
+    <!-- Bottom out: 290° -->
+    <node id="DownOut"  x="9.58"   y="-26.32" type="dead_end"/>
+    <!-- Left out:   195° -->
+    <node id="LeftOut"  x="-27.05" y="-7.25"  type="dead_end"/>
+</nodes>
