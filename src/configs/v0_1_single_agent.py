@@ -270,7 +270,7 @@ def train():
     print(f"TensorBoard → {TENSORBOARD_RUN_DIR}")
     
     run = wandb.init(
-        project="alpha-env",
+        project="md_aim",
         name=RUN_NAME,
         sync_tensorboard=True,
         monitor_gym=False,
