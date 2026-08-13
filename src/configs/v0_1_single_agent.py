@@ -262,6 +262,19 @@ TENSORBOARD_RUN_DIR = os.path.join(TENSORBOARD_DIR, RUN_NAME)
 
 from src.models.attention_model import AttentionFeatureExtractor
 from src.models.multi_discount_ppo import DualHeadPPO, DualHeadActorCriticPolicy
+import gym
+
+class RemoveTruncatedWrapper(gym.Wrapper):
+    """
+    SB3 tries to bootstrap terminal values if 'TimeLimit.truncated' is in info.
+    Since our value net outputs 2 values, this causes a crash in SB3's collect_rollouts.
+    We remove the flag so it treats horizon as a true terminal state (V=0).
+    """
+    def step(self, action):
+        obs, reward, done, info = self.env.step(action)
+        if "TimeLimit.truncated" in info:
+            del info["TimeLimit.truncated"]
+        return obs, reward, done, info
 
 def train():
     os.makedirs(CHECKPOINT_ROOT, exist_ok=True)
