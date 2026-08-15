@@ -6,3 +6,5 @@ plots/
 plots_ft/
 checkpoints/
 tensorboard_logs/
+wandb/
+.freebuff/

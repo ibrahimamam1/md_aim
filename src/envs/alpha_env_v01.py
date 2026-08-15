@@ -340,12 +340,15 @@ class AlphaEnv_v01(Env_N):
         self.k.vehicle.apply_acceleration(rl_ids, [real_action])
 
     def compute_reward(self, agent_id, fail, goal_reached, current_action=None):
-        if agent_id not in self.k.vehicle.get_ids():
-            return 0.0
-        
         # 1. Sparse Terminal Rewards
+        # NOTE: these must be checked BEFORE the departed-agent guard below.
+        # A successful agent has already left the network (SUMO removes arrived
+        # vehicles), so `agent_id not in get_ids()` is True on the goal step and
+        # would otherwise swallow the +15.0 success reward.
         if fail:           return -10.0
         if goal_reached:   return 15.0
+        if agent_id not in self.k.vehicle.get_ids():
+            return 0.0
         
         obs_info = getattr(self, 'last_neighbors_info', []) 
         

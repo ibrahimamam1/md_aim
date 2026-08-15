@@ -2,10 +2,13 @@
 plot_eval_results.py
 ────────────────────
 Reads all CSV files produced by v0_1_evaluate.py from the output directory
-and generates two grouped bar charts:
+and generates a 3x3 dashboard with grouped bar charts:
 
-  1. Collision Rate      (%) — grouped by controller version, one bar-group per scenario
-  2. Average Travel Time (s) — grouped by controller version, one bar-group per scenario
+  1. Collision Rate  (%), 2. Average Travel Time (s), 3. Average Waiting Time (s)
+  4. Success Rate    (%), 5. Average Speed (m/s),     6. Average Safe Gap (0–1)
+  7–9. Velocity / jerk profile scatter plots + worst-case velocity profile
+
+Each bar group is a scenario, with one bar per controller version.
 
 Usage (standalone):
     python plot_eval_results.py                         # uses default output/ dir
@@ -214,6 +217,9 @@ def _load_csvs(
         aggregated[rate_key][version] = {"collision_rate": float, "collision_se": float,
                                          "avg_travel_time": float, "travel_time_se": float,
                                          "avg_waiting_time": float, "waiting_time_se": float,
+                                         "success_rate": float, "success_se": float,
+                                         "avg_speed": float, "speed_se": float,
+                                         "avg_safe_gap": float, "safe_gap_se": float,
                                          "n": int}
     """
     data: dict = defaultdict(lambda: defaultdict(list))
@@ -255,6 +261,7 @@ def _load_csvs(
         fpath = os.path.join(output_dir, fname)
 
         collisions, travel_times, waiting_times = [], [], []
+        successes, avg_speeds, safe_gaps = [], [], []
         with open(fpath, newline="") as f:
             reader = csv.DictReader(f)
             for row in reader:
@@ -272,6 +279,14 @@ def _load_csvs(
                     collisions.append(col)
                     travel_times.append(tt)
                     waiting_times.append(float(row.get("waiting_time", 0.0)))
+                    successes.append(float(row.get("success", 0)))
+                    avg_speeds.append(float(row.get("avg_speed", 0.0)))
+                    # safe_gap is a newer column; older CSVs without it contribute NaN
+                    # (those cells are simply skipped in the plots)
+                    try:
+                        safe_gaps.append(float(row.get("safe_gap", "")))
+                    except (TypeError, ValueError):
+                        safe_gaps.append(float("nan"))
                 except (KeyError, ValueError):
                     continue
 
@@ -304,9 +319,21 @@ def _load_csvs(
             continue
 
         data[rate_key][version].extend(
-            [{"collision": c, "travel_time": t, "waiting_time": w}
-             for c, t, w in zip(collisions, travel_times, waiting_times)]
+            [{"collision": c, "travel_time": t, "waiting_time": w,
+              "success": s, "avg_speed": v, "safe_gap": g}
+             for c, t, w, s, v, g in
+             zip(collisions, travel_times, waiting_times, successes, avg_speeds, safe_gaps)]
         )
+
+    def _se(vals: np.ndarray) -> float:
+        """Standard error of the mean, NaN-aware."""
+        vals = np.asarray(vals, dtype=float)
+        valid = vals[np.isfinite(vals)]
+        if len(valid) == 0:
+            return float("nan")
+        if len(valid) == 1:
+            return 0.0
+        return float(valid.std(ddof=1) / np.sqrt(len(valid)))
 
     # Aggregate: mean ± standard error
     aggregated: dict = defaultdict(dict)
@@ -316,14 +343,22 @@ def _load_csvs(
             col_vals   = np.array([r["collision"]    for r in rows], dtype=float)
             tt_vals    = np.array([r["travel_time"]  for r in rows], dtype=float)
             wt_vals    = np.array([r["waiting_time"] for r in rows], dtype=float)
-            se         = lambda v: v.std(ddof=1) / np.sqrt(len(v)) if len(v) > 1 else 0.0
+            suc_vals   = np.array([r["success"]      for r in rows], dtype=float)
+            spd_vals   = np.array([r["avg_speed"]    for r in rows], dtype=float)
+            sg_vals    = np.array([r["safe_gap"]     for r in rows], dtype=float)
             aggregated[rate_key][version] = {
                 "collision_rate":    col_vals.mean() * 100,   # → percentage
-                "collision_se":      se(col_vals)    * 100,
+                "collision_se":      _se(col_vals)    * 100,
                 "avg_travel_time":   tt_vals.mean(),
-                "travel_time_se":    se(tt_vals),
+                "travel_time_se":    _se(tt_vals),
                 "avg_waiting_time":  wt_vals.mean(),
-                "waiting_time_se":   se(wt_vals),
+                "waiting_time_se":   _se(wt_vals),
+                "success_rate":      suc_vals.mean() * 100,   # → percentage
+                "success_se":        _se(suc_vals)    * 100,
+                "avg_speed":         float(np.nanmean(spd_vals)) if np.isfinite(spd_vals).any() else float("nan"),
+                "speed_se":          _se(spd_vals),
+                "avg_safe_gap":      float(np.nanmean(sg_vals)) if np.isfinite(sg_vals).any() else float("nan"),
+                "safe_gap_se":       _se(sg_vals),
                 "n":                 n,
             }
 
@@ -353,17 +388,25 @@ def _make_grouped_bar(
         errors = []
         for rate_key in rate_keys:
             entry = aggregated.get(rate_key, {}).get(ver)
-            if entry:
+            if entry is not None and np.isfinite(entry[value_key]):
                 values.append(entry[value_key])
                 errors.append(entry[error_key])
             else:
-                values.append(0.0)
+                # Missing / non-finite data (e.g. older CSVs without the metric)
+                values.append(np.nan)
                 errors.append(0.0)
 
+        values = np.asarray(values, dtype=float)
+        errors = np.asarray(errors, dtype=float)
         color, label = get_version_style(ver, i)
+
+        valid = np.isfinite(values)
+        if not valid.any():
+            continue
+
         ax.bar(
-            group_centers + offset,
-            values,
+            group_centers[valid] + offset,
+            values[valid],
             width=bar_width,
             color=color,
             alpha=ALPHA_BAR,
@@ -371,9 +414,9 @@ def _make_grouped_bar(
             zorder=3,
         )
         ax.errorbar(
-            group_centers + offset,
-            values,
-            yerr=errors,
+            group_centers[valid] + offset,
+            values[valid],
+            yerr=errors[valid],
             fmt="none",
             color="black",
             capsize=CAPSIZE,
@@ -544,8 +587,9 @@ def plot_eval_results(
     show: bool = True,
 ) -> None:
     """
-    Parse all CSVs in *output_dir* and produce a comprehensive 2x3 dashboard
-    with grouped bar charts and velocity/jerk profile scatter plots.
+    Parse all CSVs in *output_dir* and produce a comprehensive 3x3 dashboard
+    with grouped bar charts (collision/success rate, travel/waiting time,
+    average speed, average safe gap) and velocity/jerk profile scatter plots.
 
     Parameters
     ----------
@@ -601,16 +645,17 @@ def plot_eval_results(
     if version_filter:
         title_suffix += f" ({version_filter})"
 
-    fig, axes = plt.subplots(2, 3, figsize=FIGSIZE)
+    fig, axes = plt.subplots(3, 3, figsize=FIGSIZE)
     fig.suptitle(
         f"Evaluation Results & Profile Analysis{title_suffix}",
         fontsize=TITLE_FONTSIZE + 2,
         fontweight="bold",
-        y=0.98,
+        y=0.99,
     )
 
-    ax_col, ax_tt, ax_wt = axes[0, 0], axes[0, 1], axes[0, 2]
-    ax_vd, ax_jd, ax_worst = axes[1, 0], axes[1, 1], axes[1, 2]
+    ax_col, ax_tt, ax_wt  = axes[0, 0], axes[0, 1], axes[0, 2]
+    ax_sr, ax_spd, ax_sg  = axes[1, 0], axes[1, 1], axes[1, 2]
+    ax_vd, ax_jd, ax_worst = axes[2, 0], axes[2, 1], axes[2, 2]
 
     _make_grouped_bar(
         ax=ax_col,
@@ -643,6 +688,39 @@ def plot_eval_results(
         error_key="waiting_time_se",
         ylabel="Avg Waiting Time (s)",
         title="Average Waiting Time by Scenario & Controller",
+    )
+
+    _make_grouped_bar(
+        ax=ax_sr,
+        aggregated=aggregated,
+        rate_keys=rate_keys,
+        versions=versions,
+        value_key="success_rate",
+        error_key="success_se",
+        ylabel="Success Rate (%)",
+        title="Success Rate by Scenario & Controller",
+    )
+
+    _make_grouped_bar(
+        ax=ax_spd,
+        aggregated=aggregated,
+        rate_keys=rate_keys,
+        versions=versions,
+        value_key="avg_speed",
+        error_key="speed_se",
+        ylabel="Avg Speed (m/s)",
+        title="Average Speed by Scenario & Controller",
+    )
+
+    _make_grouped_bar(
+        ax=ax_sg,
+        aggregated=aggregated,
+        rate_keys=rate_keys,
+        versions=versions,
+        value_key="avg_safe_gap",
+        error_key="safe_gap_se",
+        ylabel="Avg Safe Gap (0\u20131)",
+        title="Average Safe Gap by Scenario & Controller",
     )
 
     # Plot profile scatter charts on bottom row — distance-based only

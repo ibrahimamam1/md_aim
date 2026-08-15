@@ -5,6 +5,7 @@ import csv
 import random
 import gc
 import resource
+import statistics
 import subprocess
 import time
 from copy import deepcopy
@@ -48,6 +49,12 @@ parser.add_argument("--version", required=True,
                     ])
 parser.add_argument("--n_sims", type=int, default=42, help="Runs per scenario combo.")
 parser.add_argument("--render", action="store_true", default=False)
+parser.add_argument("--wandb", action="store_true", default=False,
+                    help="Log aggregate per-scenario metrics (success rate, avg speed, safe gap) to Weights & Biases.")
+parser.add_argument("--wandb_project", type=str, default="md_aim",
+                    help="W&B project to log to (used with --wandb).")
+parser.add_argument("--wandb_name", type=str, default=None,
+                    help="W&B run name (used with --wandb). Defaults to eval_<version>_<timestamp>.")
 args = parser.parse_args() if __name__ == '__main__' else None
 
 # ─────────────── Sim Params ────────────────────
@@ -98,7 +105,7 @@ traffic_rates = {
 }
 
 CSV_HEADER = [
-    "run", "collision", "success", "avg_speed", "travel_time", "waiting_time",
+    "run", "collision", "success", "avg_speed", "safe_gap", "travel_time", "waiting_time",
     "time_profile", "distance_profile", "velocity_profile", "jerk_profile", "acceleration_profile",
 ]
 
@@ -168,6 +175,36 @@ def _open_fd_count():
         return -1
 
 
+def _aggregate_metrics(summaries):
+    """Summaries (list of dicts with numeric per-run metrics) -> dict of aggregates.
+
+    Averages every per-run metric, plus std where meaningful, and the run count.
+    Success/collision are 0/1 flags, so their means ARE the rates.
+    """
+    out = {}
+    for key, label in [
+        ("success", "success_rate"),
+        ("collision", "collision_rate"),
+        ("avg_speed", "avg_speed"),
+        ("safe_gap", "safe_gap"),
+        ("travel_time", "travel_time"),
+        ("waiting_time", "waiting_time"),
+    ]:
+        vals = [float(s[key]) for s in summaries if key in s]
+        if vals:
+            out[label] = sum(vals) / len(vals)
+            out[label + "_std"] = statistics.stdev(vals) if len(vals) > 1 else 0.0
+    out["num_runs"] = len(summaries)
+    return out
+
+
+def _log_group_to_wandb(group_name, summaries):
+    """Log one scenario group's aggregates to wandb under `eval/<group_name>/`."""
+    import wandb  # lazy: only needed when --wandb is passed
+    metrics = _aggregate_metrics(summaries)
+    wandb.log({f"eval/{group_name}/{k}": v for k, v in metrics.items()})
+
+
 def main():
     version = args.version
     checkpoint_path = args.checkpoint
@@ -228,6 +265,30 @@ def main():
         base_model = PPO.load(checkpoint_path)
     print("Model loaded.\n")
 
+    # ── Optional W&B logging (--wandb) ──────────────────────────────────────
+    wandb_run = None
+    if args.wandb:
+        try:
+            import wandb
+            wandb_run = wandb.init(
+                project=args.wandb_project,
+                name=args.wandb_name or f"eval_{version}_{time.strftime('%Y%m%d_%H%M%S')}",
+                config={
+                    "checkpoint": checkpoint_path,
+                    "version": version,
+                    "n_sims": n_sims,
+                    "scenarios": list(scenarios.keys()),
+                    "intentions": list(intentions.keys()),
+                },
+                save_code=True,
+            )
+            print(f"[wandb] logging to project '{args.wandb_project}' run '{wandb_run.name}'")
+        except Exception as exc:
+            print(f"[wandb] init failed ({exc}); continuing WITHOUT wandb logging.")
+            wandb_run = None
+
+    all_summaries = []
+
     for scen_key, scen_net_file in scenarios.items():
         for int_key, int_class in intentions.items():
             for rate_key, rate_list in traffic_rates.items():
@@ -238,6 +299,7 @@ def main():
                     csv.DictWriter(f, fieldnames=CSV_HEADER).writeheader()
 
                 print(f"\n>>> {group_name} ({n_sims} runs)")
+                group_summaries = []
 
                 for run_idx in range(n_sims):
                     current_flow = random.choice(rate_list)
@@ -298,6 +360,7 @@ def main():
                             "collision":    1 if telemetry.get("agent_collision", False) else 0,
                             "success":      1 if telemetry.get("agent_success",   False) else 0,
                             "avg_speed":    f"{telemetry.get('agent_avg_speed',    0.0):.4f}",
+                            "safe_gap":     f"{telemetry.get('agent_avg_safe_gap', 1.0):.4f}",
                             "travel_time":  f"{telemetry.get('agent_travel_time',  0.0):.4f}",
                             "waiting_time": f"{telemetry.get('agent_waiting_time', 0.0):.4f}",
                             "time_profile": _fmt_profile(telemetry.get("agent_times", [])),
@@ -340,10 +403,31 @@ def main():
                     with open(csv_path, "a", newline="") as f:
                         csv.DictWriter(f, fieldnames=CSV_HEADER).writerow(row)
 
+                    group_summaries.append({
+                        "success":     float(row["success"]),
+                        "collision":   float(row["collision"]),
+                        "avg_speed":   float(row["avg_speed"]),
+                        "safe_gap":    float(row["safe_gap"]),
+                        "travel_time": float(row["travel_time"]),
+                        "waiting_time": float(row["waiting_time"]),
+                    })
+
                     print(f"  Run {run_idx:02d} | col={row['collision']} suc={row['success']}"
                           f" spd={row['avg_speed']} tt={row['travel_time']}")
 
                 print(f"  [CSV] → {csv_path}")
+
+                if wandb_run is not None and group_summaries:
+                    _log_group_to_wandb(group_name, group_summaries)
+                    print(f"  [wandb] logged eval/{group_name}/ {{success_rate, collision_rate, avg_speed, safe_gap, ...}}")
+                    all_summaries.extend(group_summaries)
+
+    if wandb_run is not None:
+        if all_summaries:
+            _log_group_to_wandb("overall", all_summaries)
+            print(f"  [wandb] logged eval/overall/ across {len(all_summaries)} runs")
+        wandb_run.finish()
+        print("[wandb] run finished.\n")
 
     print("\n--- EVALUATION COMPLETE ---")
 

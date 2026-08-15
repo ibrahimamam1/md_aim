@@ -101,7 +101,7 @@ os.makedirs(output_dir, exist_ok=True)
 CSV_HEADER = [
     "run", "version", "ego_route", "episode_index",
     "collision", "success",
-    "avg_speed", "travel_time", "waiting_time",
+    "avg_speed", "safe_gap", "travel_time", "waiting_time",
     "bg_spawn_period",
     "time_profile", "distance_profile", "velocity_profile",
     "jerk_profile", "acceleration_profile",
@@ -338,6 +338,7 @@ def main():
                     "collision":          1 if telemetry.get("agent_collision", False) else 0,
                     "success":            1 if telemetry.get("agent_success", False) else 0,
                     "avg_speed":          f"{telemetry.get('agent_avg_speed', 0.0):.4f}",
+                    "safe_gap":           f"{telemetry.get('agent_avg_safe_gap', 1.0):.4f}",
                     "travel_time":        f"{telemetry.get('agent_travel_time', 0.0):.4f}",
                     "waiting_time":       f"{telemetry.get('agent_waiting_time', 0.0):.4f}",
                     "bg_spawn_period":    bg_period,

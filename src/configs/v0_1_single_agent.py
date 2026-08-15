@@ -215,24 +215,53 @@ def create_flow_env(env_config):
 
 class TrafficCallback(BaseCallback):
     """
-    Custom callback for logging telemetry metrics to TensorBoard
+    Custom callback for logging episode-level telemetry metrics to TensorBoard
+    (which wandb picks up via sync_tensorboard=True).
+
+    Metrics are aggregated per completed episode and recorded once per rollout:
+      - success_rate : fraction of episodes that reached the goal
+      - collision_rate : fraction of episodes that ended in a crash
+      - avg_speed    : mean of per-episode average speeds (m/s)
+      - avg_safe_gap : mean of per-episode average |d_eta| safety gaps [0, 1]
+      - episodes     : number of completed episodes in the rollout
     """
     def __init__(self, verbose=0):
         super(TrafficCallback, self).__init__(verbose)
+        self._episodes = 0
+        self._successes = 0
+        self._collisions = 0
+        self._sum_avg_speed = 0.0
+        self._sum_safe_gap = 0.0
 
     def _on_step(self) -> bool:
-        # Check if environment provided an info dictionary at this step
+        # Episode telemetry is present only on the step an episode ends
         for info in self.locals.get("infos", []):
-            if "telemetry" in info:
-                telemetry = info["telemetry"]
-                if telemetry is None:
-                    continue
-                
-                # Log metrics to TensorBoard (averaged automatically over the rollout)
-                self.logger.record("custom_metrics/collision", 1.0 if telemetry.get("agent_collision", False) else 0.0)
-                self.logger.record("custom_metrics/success", 1.0 if telemetry.get("agent_success", False) else 0.0)
-                self.logger.record("custom_metrics/avg_speed", float(telemetry.get("agent_avg_speed", 0.0)))
-                
+            telemetry = info.get("telemetry")
+            if telemetry is None:
+                continue
+            self._episodes += 1
+            if telemetry.get("agent_success", False):
+                self._successes += 1
+            if telemetry.get("agent_collision", False):
+                self._collisions += 1
+            self._sum_avg_speed += float(telemetry.get("agent_avg_speed", 0.0))
+            self._sum_safe_gap += float(telemetry.get("agent_avg_safe_gap", 1.0))
+        return True
+
+    def _on_rollout_end(self) -> bool:
+        n = self._episodes
+        if n > 0:
+            self.logger.record("custom_metrics/episodes", n)
+            self.logger.record("custom_metrics/success_rate", self._successes / n)
+            self.logger.record("custom_metrics/collision_rate", self._collisions / n)
+            self.logger.record("custom_metrics/avg_speed", self._sum_avg_speed / n)
+            self.logger.record("custom_metrics/avg_safe_gap", self._sum_safe_gap / n)
+        # Reset per-rollout counters
+        self._episodes = 0
+        self._successes = 0
+        self._collisions = 0
+        self._sum_avg_speed = 0.0
+        self._sum_safe_gap = 0.0
         return True
 
 def linear_schedule_with_floor(initial_value: float, min_value: float):

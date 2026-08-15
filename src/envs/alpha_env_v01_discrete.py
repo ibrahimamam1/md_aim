@@ -46,12 +46,14 @@ class AlphaEnv_v01_Discrete(AlphaEnv_v01):
         self.k.vehicle.apply_acceleration(rl_ids, [real_action])
 
     def compute_reward(self, agent_id, fail, goal_reached, current_action=None):
-        if agent_id not in self.k.vehicle.get_ids():
-            return 0.0
-        
         # 1. Sparse Terminal Rewards
+        # NOTE: must be checked before the departed-agent guard below — a
+        # successful agent has already left the network (SUMO removes arrived
+        # vehicles), so get_ids() no longer contains it on the goal step.
         if fail:           return -10.0
         if goal_reached:   return 15.0
+        if agent_id not in self.k.vehicle.get_ids():
+            return 0.0
         
         # Fallback to empty list if no neighbors
         obs_info = getattr(self, 'last_neighbors_info', []) 

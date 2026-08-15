@@ -24,6 +24,25 @@ RED = '\033[91m'
 CYAN = '\033[96m'
 RESET = '\033[0m'
 
+# Fallback mapping of (incoming edge, outgoing edge) -> internal junction edge.
+# This matches 100m_right_before_left.net.xml. The per-network mapping is read
+# from the loaded net.xml at runtime (see Env_N._build_connection_maps), because
+# internal-edge numbering depends on how netconvert generated the junction.
+DEFAULT_INTERNAL_CONNECTIONS = {
+    ('E#D-X', 'E#X-R'): ':X_6',
+    ('E#D-X', 'E#X-T'): ':X_7',
+    ('E#D-X', 'E#X-L'): ':X_8',
+    ('E#L-X', 'E#X-D'): ':X_9',
+    ('E#L-X', 'E#X-R'): ':X_10',
+    ('E#L-X', 'E#X-T'): ':X_11',
+    ('E#R-X', 'E#X-T'): ':X_3',
+    ('E#R-X', 'E#X-L'): ':X_4',
+    ('E#R-X', 'E#X-D'): ':X_5',
+    ('E#T-X', 'E#X-L'): ':X_0',
+    ('E#T-X', 'E#X-D'): ':X_1',
+    ('E#T-X', 'E#X-R'): ':X_2',
+}
+
 class Env_N(gym.Env, metaclass=ABCMeta):
     """
     """
@@ -94,21 +113,12 @@ class Env_N(gym.Env, metaclass=ABCMeta):
         self.k.junction.master_kernel = self.k
 
         self.setup_initial_state()
-        
-        self.internal_connections = {
-            ('E#D-X', 'E#X-R'): ':X_6',
-            ('E#D-X', 'E#X-T'): ':X_7',
-            ('E#D-X', 'E#X-L'): ':X_8',
-            ('E#L-X', 'E#X-D'): ':X_9',
-            ('E#L-X', 'E#X-R'): ':X_10',
-            ('E#L-X', 'E#X-T'): ':X_11',
-            ('E#R-X', 'E#X-T'): ':X_3',
-            ('E#R-X', 'E#X-L'): ':X_4',
-            ('E#R-X', 'E#X-D'): ':X_5',
-            ('E#T-X', 'E#X-L'): ':X_0',
-            ('E#T-X', 'E#X-D'): ':X_1',
-            ('E#T-X', 'E#X-R'): ':X_2',
-        }
+
+        # (in->out) -> internal edge and internal edge -> (out) mappings, parsed
+        # from the network's <connection> table at runtime so the geometry is
+        # correct for whichever net.xml is loaded (training vs evaluation use
+        # different junction layouts).
+        self.internal_connections, self.internal_to_out = self._build_connection_maps()
         # Renderer Setup
         if self.sim_params.render in ['gray', 'dgray', 'rgb', 'drgb']:
             save_render = self.sim_params.save_render
@@ -177,6 +187,7 @@ class Env_N(gym.Env, metaclass=ABCMeta):
             "agent_times": [],           # List of times since spawn for every step agent is alive
             "agent_distances": [],       # List of cumulative distance for every step agent is alive
             "agent_jerks": [],           # List of jerk values for every step agent is alive
+            "agent_safe_gaps": [],       # Per-step min |d_eta| to conflicting neighbors (1.0 = safe/no neighbor)
             "agent_waiting_time": 0.0,   # Accumulated time agent speed < 0.1
             "agent_spawn_time": None,    # Time step agent first appeared
             "agent_finish_time": None,   # Time step agent left (success or crash)
@@ -238,6 +249,24 @@ class Env_N(gym.Env, metaclass=ABCMeta):
             self.telemetry["agent_collision"] = True
             self.telemetry["agent_finish_time"] = current_time
 
+    def _update_safe_gap_telemetry(self):
+        """
+        Record the per-step safety gap of the RL agent.
+
+        The gap is the minimum absolute normalized time-gap |d_eta| to any
+        conflicting neighbor in the perception radius:
+            - 1.0  → perfectly separated (or no conflicting neighbor in range)
+            - 0.0  → ego and neighbor arrive at the conflict point simultaneously
+        """
+        if self.agent_id is None or self.agent_id not in self.k.vehicle.get_ids():
+            return
+        nbrs = getattr(self, 'last_neighbors_info', None) or []
+        if nbrs:
+            gap = min(abs(n['d_eta']) for n in nbrs)
+        else:
+            gap = 1.0
+        self.telemetry["agent_safe_gaps"].append(float(gap))
+
     def _compute_telemetry_stats(self):
         """
         Returns the raw agent statistics.
@@ -264,6 +293,10 @@ class Env_N(gym.Env, metaclass=ABCMeta):
             "agent_travel_time": duration,
             "agent_waiting_time": self.telemetry["agent_waiting_time"],
             "agent_avg_speed": float(avg_speed),
+            "agent_avg_safe_gap": (
+                float(np.mean(self.telemetry["agent_safe_gaps"]))
+                if self.telemetry["agent_safe_gaps"] else 1.0
+            ),
             "agent_avg_accel": float(avg_accel),
             "agent_total_distance": self.telemetry["agent_total_distance"],
             "agent_times": list(self.telemetry["agent_times"]),
@@ -311,6 +344,7 @@ class Env_N(gym.Env, metaclass=ABCMeta):
         
         # 3. Retrieve Observations
         obs = self.get_state()
+        self._update_safe_gap_telemetry()
         colliding_ids = set(self.k.kernel_api.simulation.getCollidingVehiclesIDList())
         rl_ids_set = set(self.k.vehicle.get_rl_ids())
         rl_crash_ids = colliding_ids & rl_ids_set  # Only RL vehicles that actually crashed
@@ -450,6 +484,49 @@ class Env_N(gym.Env, metaclass=ABCMeta):
         return obs, {}
     
 
+    def _build_connection_maps(self):
+        """
+        Build the junction connection maps from the loaded network file.
+
+        The internal-edge ids in a net.xml depend on how netconvert generated
+        the junction, so they must be read from the file at runtime. This is
+        what makes the Frenet geometry correct for any intersection layout
+        (the training and evaluation networks number their internal edges
+        differently).
+
+        Returns
+        -------
+        (connections, internal_to_out)
+            connections     : {(from_edge, to_edge): internal_edge}
+            internal_to_out : {internal_edge: to_edge}
+        """
+        connections = {}
+        net_file = getattr(self.net_params, 'template', None)
+        if net_file and os.path.exists(net_file):
+            import xml.etree.ElementTree as ET
+            try:
+                root = ET.parse(net_file).getroot()
+                for conn in root.iter('connection'):
+                    from_edge = conn.get('from')
+                    to_edge = conn.get('to')
+                    via = conn.get('via')
+                    if from_edge and to_edge and via:
+                        # 'via' is the internal LANE id (e.g. ':X_3_0'); strip
+                        # the lane suffix to get the internal EDGE id (':X_3').
+                        internal_edge = via.rsplit('_', 1)[0] if via.startswith(':') else via
+                        connections[(from_edge, to_edge)] = internal_edge
+            except Exception:
+                connections = {}
+
+        if not connections:
+            connections = DEFAULT_INTERNAL_CONNECTIONS
+
+        internal_to_out = {}
+        for (_, to_edge), internal_edge in connections.items():
+            internal_to_out.setdefault(internal_edge, to_edge)
+
+        return connections, internal_to_out
+
     def _get_vehicle_polyline(self, veh_id):
         """
         Builds a continuous Shapely LineString of the vehicle's future path, 
@@ -488,20 +565,27 @@ class Env_N(gym.Env, metaclass=ABCMeta):
         # Handle the case where the vehicle is already inside the intersection (on an internal edge)
         elif current_edge.startswith(':'):
             try:
-                # If inside the intersection, route[0] is usually the target outgoing edge
-                next_edge = route[0] if route else None
+                # Stitch the OUTGOING macro edge of the connection that passes
+                # through this internal edge. The vehicle's route contains only
+                # macro edges, so route[0] is the ORIGIN edge, not the destination.
+                next_edge = self.internal_to_out.get(current_edge)
                 if next_edge:
                     coords.extend(self.k.kernel_api.lane.getShape(next_edge + "_0"))
             except IndexError:
                 pass
     
+        # Drop consecutive duplicate coordinates (macro and internal edge shapes
+        # share their junction-boundary endpoint, which creates zero-length
+        # segments that make Shapely project() return NaN).
+        deduped = [c for i, c in enumerate(coords) if i == 0 or c != coords[i - 1]]
+    
         # Fallback to avoid Shapely crashing on single-coordinate lines
-        if len(coords) < 2:
+        if len(deduped) < 2:
             x, y = self.k.vehicle.get_2d_position(veh_id)
             # Create a tiny arbitrary line indicating a stopped/lost vehicle
             return LineString([(x, y), (x+0.1, y+0.1)]), pos
             
-        return LineString(coords), pos 
+        return LineString(deduped), pos 
 
     @property
     def sorted_ids(self):

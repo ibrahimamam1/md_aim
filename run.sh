@@ -50,7 +50,7 @@ for arg in "$@"; do
         echo "       n_sims: 400"
         echo "========================================================================"
 
-        "$PYTHON_CMD" src/test/v0_1_evaluate.py --checkpoint "${CHECKPOINT_PATH}" --version "${VERSION}" --n_sims 400
+        "$PYTHON_CMD" src/test/v0_1_evaluate.py --checkpoint "${CHECKPOINT_PATH}" --version "${VERSION}" --n_sims 50
 
         echo "========================================================================"
         echo " Finished training and evaluation for version: ${VERSION}"

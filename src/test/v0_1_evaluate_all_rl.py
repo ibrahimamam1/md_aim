@@ -105,7 +105,7 @@ traffic_rates = {
 }
 
 CSV_HEADER = [
-    "run", "collision", "success", "avg_speed", "travel_time", "waiting_time",
+    "run", "collision", "success", "avg_speed", "safe_gap", "travel_time", "waiting_time",
     "total_collisions", "num_collided_vehicles", "all_vehicles_avg_travel_time", "total_vehicles_spawned",
     "collision_rate",
     "time_profile", "distance_profile", "velocity_profile", "jerk_profile",
@@ -143,6 +143,7 @@ class AllRLAttentionEnv(AlphaEnv_v01_Attention):
         self.all_collided_vehs = set()
         self.all_veh_speeds = []
         self.all_veh_waiting_time = 0.0
+        self.all_veh_safe_gaps = []
 
     def _update_telemetry_step(self):
         current_time = self.time_counter
@@ -190,6 +191,10 @@ class AllRLAttentionEnv(AlphaEnv_v01_Attention):
             "agent_travel_time": avg_tt_all,
             "agent_waiting_time": avg_waiting_all,
             "agent_avg_speed": avg_speed_all,
+            "agent_avg_safe_gap": (
+                float(np.mean(self.all_veh_safe_gaps))
+                if self.all_veh_safe_gaps else 1.0
+            ),
             "total_collisions": num_collisions,
             "num_collided_vehicles": num_collided_vehs,
             "all_vehicles_avg_travel_time": avg_tt_all,
@@ -285,7 +290,13 @@ class AllRLAttentionEnv(AlphaEnv_v01_Attention):
                     continue
 
                 try:
-                    obs, _ = self._get_local_observation(veh_id)
+                    obs, nbrs = self._get_local_observation(veh_id)
+                    # Per-vehicle safety gap: min |d_eta| to conflicting neighbors
+                    # (1.0 when the vehicle has no conflicting neighbor in range).
+                    if nbrs:
+                        self.all_veh_safe_gaps.append(min(abs(n['d_eta']) for n in nbrs))
+                    else:
+                        self.all_veh_safe_gaps.append(1.0)
                     obs_input = obs.reshape(1, -1)
                     act, _ = self.shared_policy.predict(obs_input, deterministic=True)
                     action_val = float(act[0]) if isinstance(act, np.ndarray) else float(act)
@@ -529,6 +540,7 @@ def main():
                             "collision":                    1 if telemetry.get("agent_collision", False) else 0,
                             "success":                      1 if telemetry.get("agent_success", False) else 0,
                             "avg_speed":                    f"{telemetry.get('agent_avg_speed', 0.0):.4f}",
+                            "safe_gap":                     f"{telemetry.get('agent_avg_safe_gap', 1.0):.4f}",
                             "travel_time":                  f"{telemetry.get('agent_travel_time', 0.0):.4f}",
                             "waiting_time":                 f"{telemetry.get('agent_waiting_time', 0.0):.4f}",
                             "total_collisions":             telemetry.get("total_collisions", 0),
