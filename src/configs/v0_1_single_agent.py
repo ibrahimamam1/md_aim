@@ -15,6 +15,9 @@ parser.add_argument("--version", choices=[
     "attention_discrete", "attention_discrete_3", "attention_discrete_5", "attention_discrete_10",
     "attention_continuous", "attention_continous"
 ], default="heuristic_discrete", help="Environment version to use.")
+parser.add_argument("--gamma", type=float, default=0.90, help="Short term discount factor.")
+parser.add_argument("--gamma_long", type=float, default=0.99, help="Long term discount factor.")
+parser.add_argument("--note", type=str, default="", help="Optional note about the experiment.")
 args = parser.parse_args()
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
@@ -282,10 +285,10 @@ ALGO_NAME = "PPO"
 
 CHECKPOINT_ROOT = os.path.join(
     os.getcwd(), "checkpoints/v0_1",
-    f"{args.version}_{ENV_NAME}_{ALGO_NAME}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+    f"{args.version}_{ENV_NAME}_{ALGO_NAME}_g{args.gamma}_gl{args.gamma_long}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
 )
 TENSORBOARD_DIR = os.path.join(os.getcwd(), "tensorboard_logs/v0_1_",f"{args.version}")
-RUN_NAME = f"flow_ppo_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+RUN_NAME = f"flow_ppo_g{args.gamma}_gl{args.gamma_long}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 TENSORBOARD_RUN_DIR = os.path.join(TENSORBOARD_DIR, RUN_NAME)
 
 
@@ -328,6 +331,7 @@ def train():
     run = wandb.init(
         project="md_aim",
         name=RUN_NAME,
+        notes=args.note if args.note else None,
         sync_tensorboard=True,
         monitor_gym=False,
         save_code=True,
@@ -337,7 +341,7 @@ def train():
     n_steps = 1024 
     
     # 800 iterations * 8192 batch size = 6,553,600 total timesteps
-    total_timesteps = 1500000
+    total_timesteps = 1000000
     
     # Vectorized environments for multi-processing
     def make_env():
@@ -369,8 +373,8 @@ def train():
         n_steps=n_steps,
         batch_size=256,
         n_epochs=10,
-        gamma=0.90,
-        gamma_long=0.99,
+        gamma=args.gamma,
+        gamma_long=args.gamma_long,
         gae_lambda=0.95,
         clip_range=0.25,
         max_grad_norm=0.5,

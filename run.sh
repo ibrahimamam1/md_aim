@@ -16,45 +16,43 @@ else
     PYTHON_CMD="python"
 fi
 
-if [ "$#" -eq 0 ]; then
-    echo "Usage: $0 <version1> [version2 ...]"
-    echo "Example: $0 heuristic_discrete_3 heuristic_discrete_5"
-    exit 1
-fi
+function run_experiment() {
+    local gamma=$1
+    local version="attention_continuous"
+    local eval_version="attention_continous"
+    
+    echo "========================================================================"
+    echo " Starting training: gamma=${gamma}, version=${version}"
+    echo "========================================================================"
+    
+    "$PYTHON_CMD" src/configs/v0_1_single_agent.py --train --version "${version}" --gamma_long 0.999 --gamma "${gamma}" --note "gamma short experiment"
 
-# Iterate through each version passed (handles multiple arguments or space-separated lists)
-for arg in "$@"; do
-    for VERSION in $arg; do
-        echo "========================================================================"
-        echo " [1/2] Starting v0_1 training for version: ${VERSION}"
-        echo "========================================================================"
+    # Find the most recently created checkpoint directory for this version
+    LATEST_DIR=$(ls -td checkpoints/v0_1/"${version}"_* 2>/dev/null | head -n 1)
+    if [ -z "${LATEST_DIR}" ]; then
+        echo "ERROR: No checkpoint directory found in checkpoints/v0_1/ matching prefix '${version}_*'"
+        exit 1
+    fi
 
-        "$PYTHON_CMD" src/configs/v0_1_single_agent.py --train --version "${VERSION}"
+    CHECKPOINT_PATH="${LATEST_DIR}/final_model"
+    if [ ! -f "${CHECKPOINT_PATH}.zip" ] && [ ! -f "${CHECKPOINT_PATH}" ]; then
+        echo "ERROR: Final model checkpoint not found at ${CHECKPOINT_PATH}.zip"
+        exit 1
+    fi
 
-        # Find the most recently created checkpoint directory for this version
-        LATEST_DIR=$(ls -td checkpoints/v0_1/"${VERSION}"_* 2>/dev/null | head -n 1)
-        if [ -z "${LATEST_DIR}" ]; then
-            echo "ERROR: No checkpoint directory found in checkpoints/v0_1/ matching prefix '${VERSION}_*'"
-            exit 1
-        fi
+    echo "========================================================================"
+    echo " Running evaluation: gamma=${gamma}, version=${eval_version}"
+    echo " Checkpoint: ${CHECKPOINT_PATH}"
+    echo "========================================================================"
 
-        CHECKPOINT_PATH="${LATEST_DIR}/final_model"
-        if [ ! -f "${CHECKPOINT_PATH}.zip" ] && [ ! -f "${CHECKPOINT_PATH}" ]; then
-            echo "ERROR: Final model checkpoint not found at ${CHECKPOINT_PATH}.zip"
-            exit 1
-        fi
+    "$PYTHON_CMD" src/test/v0_1_evaluate.py --checkpoint "${CHECKPOINT_PATH}" --version "${eval_version}" --n_sims 50 --wandb
+    
+    echo " Finished gamma=${gamma}"
+    echo ""
+}
 
-        echo "========================================================================"
-        echo " [2/2] Running evaluation for version: ${VERSION}"
-        echo "       Checkpoint: ${CHECKPOINT_PATH}"
-        echo "       n_sims: 400"
-        echo "========================================================================"
-
-        "$PYTHON_CMD" src/test/v0_1_evaluate.py --checkpoint "${CHECKPOINT_PATH}" --version "${VERSION}" --n_sims 50
-
-        echo "========================================================================"
-        echo " Finished training and evaluation for version: ${VERSION}"
-        echo "========================================================================"
-        echo ""
-    done
-done
+run_experiment 0.90
+run_experiment 0.925
+run_experiment 0.95
+run_experiment 0.975
+run_experiment 0.999
