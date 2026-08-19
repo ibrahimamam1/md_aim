@@ -25,7 +25,7 @@ function run_experiment() {
     echo " Starting training: gamma=${gamma}, version=${version}"
     echo "========================================================================"
     
-    "$PYTHON_CMD" src/configs/v0_1_single_agent.py --train --version "${version}" --gamma_long 0.999 --gamma "${gamma}" --note "gamma short experiment"
+    "$PYTHON_CMD" src/configs/v0_1_single_agent.py --train --version "${version}" --gamma_long  "${gamma}" --gamma  0.999 --note "gamma Long experiment"
 
     # Find the most recently created checkpoint directory for this version
     LATEST_DIR=$(ls -td checkpoints/v0_1/"${version}"_* 2>/dev/null | head -n 1)
