@@ -448,13 +448,12 @@ def print_neighbor_table(step_num, obs, reward, neighbors_info, terminated, trun
         print(f"║  {'#':<3} {'dir':<4} {'dist':>6} {'speed':>6} {'ego_d':>6} {'delta_eta':>6} {'edge':<12}║")
         print(f"║  {'─'*70}║")
         for i, n in enumerate(neighbors_info):
-            direction = _angle_arrow(n['sin'], n['cos'])
-            dist_norm = n['distance']
-            speed_pct = n['v']
-            ego_d = n['ego_dist_to_cp']
-            delta_eta = n['d_eta'] # FIX 4: Corrected key lookup 
-            bar = _risk_bar(ego_d)
-            edge = n['edge'][:12].ljust(12)
+            direction = _angle_arrow(n.get('other_sin', 0), n.get('other_cos', 1))
+            dist_norm = n.get('distance', 0)
+            speed_pct = n.get('other_speed', 0)
+            ego_d = n.get('ego_dist_to_cp_norm', 0)
+            delta_eta = n.get('d_eta', 0)
+            edge = n.get('edge', '')[:12].ljust(12)
 
             print(f"║  {i+1:<3} {direction:<4} {dist_norm:>6.2f} {speed_pct:>6.2f} "
                   f" {ego_d:>6.2f} {delta_eta:>6.2f}   {edge}║")
