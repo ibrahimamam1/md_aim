@@ -17,15 +17,18 @@ else
 fi
 
 function run_experiment() {
-    local gamma=$1
+    local gamma_short=$1
+    local gamma_long=$2
     local version="attention_continuous"
     local eval_version="attention_continous"
-    
+
     echo "========================================================================"
-    echo " Starting training: gamma=${gamma}, version=${version}"
+    echo " Starting training: gamma_short=${gamma_short}, gamma_long=${gamma_long}, version=${version}"
     echo "========================================================================"
-    
-    "$PYTHON_CMD" src/configs/v0_1_single_agent.py --train --version "${version}" --gamma_long  "${gamma}" --gamma  0.999 --note "gamma Long experiment"
+
+    "$PYTHON_CMD" src/configs/v0_1_single_agent.py --train --version "${version}" \
+        --gamma "${gamma_short}" --gamma_long "${gamma_long}" \
+        --note "gamma_short=${gamma_short} gamma_long=${gamma_long}"
 
     # Find the most recently created checkpoint directory for this version
     LATEST_DIR=$(ls -td checkpoints/v0_1/"${version}"_* 2>/dev/null | head -n 1)
@@ -41,18 +44,18 @@ function run_experiment() {
     fi
 
     echo "========================================================================"
-    echo " Running evaluation: gamma=${gamma}, version=${eval_version}"
+    echo " Running evaluation: gamma_short=${gamma_short}, gamma_long=${gamma_long}, version=${eval_version}"
     echo " Checkpoint: ${CHECKPOINT_PATH}"
     echo "========================================================================"
 
     "$PYTHON_CMD" src/test/v0_1_evaluate.py --checkpoint "${CHECKPOINT_PATH}" --version "${eval_version}" --n_sims 50 --wandb
-    
-    echo " Finished gamma=${gamma}"
+
+    echo " Finished gamma_short=${gamma_short} gamma_long=${gamma_long}"
     echo ""
 }
 
-run_experiment 0.90
-run_experiment 0.925
-run_experiment 0.95
-run_experiment 0.975
-run_experiment 0.999
+# run_experiment <gamma_short> <gamma_long>
+run_experiment 0.90  0.999
+run_experiment 0.95  0.999
+run_experiment 0.99  0.999
+run_experiment 0.999 0.999

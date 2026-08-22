@@ -322,6 +322,24 @@ class DisableBootstrapCallback(BaseCallback):
                 info["TimeLimit.truncated"] = False
         return True
 
+class AdvantageLogCallback(BaseCallback):
+    """
+    Logs mean advantages_short, advantages_long, and total_advantage
+    from the rollout buffer to TensorBoard / wandb at the end of each rollout.
+    """
+    def _on_rollout_end(self) -> bool:
+        buf = self.model.rollout_buffer
+        adv_short = buf.advantages_short.mean()
+        adv_long  = buf.advantages_long.mean()
+        adv_total = buf.advantages.mean()
+        self.logger.record("rollout/advantages_short", float(adv_short))
+        self.logger.record("rollout/advantages_long",  float(adv_long))
+        self.logger.record("rollout/total_advantage",  float(adv_total))
+        return True
+
+    def _on_step(self) -> bool:
+        return True
+
 def train():
     os.makedirs(CHECKPOINT_ROOT, exist_ok=True)
     
@@ -388,7 +406,7 @@ def train():
     # Train
     model.learn(
         total_timesteps=total_timesteps, 
-        callback=[TrafficCallback(), WandbCallback(model_save_path=CHECKPOINT_ROOT), disable_bootstrap_cb],
+        callback=[TrafficCallback(), WandbCallback(model_save_path=CHECKPOINT_ROOT), disable_bootstrap_cb, AdvantageLogCallback()],
         progress_bar=True
     )
 

@@ -58,6 +58,10 @@ class MultiDiscountRolloutBuffer(RolloutBuffer):
         
         # Total advantage (scalar per env)
         self.advantages = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
+
+        # Per-component advantages for logging
+        self.advantages_short = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
+        self.advantages_long = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
         
         self.generator_ready = False
         self.pos = 0
@@ -129,7 +133,9 @@ class MultiDiscountRolloutBuffer(RolloutBuffer):
             # Store returns and total advantages
             self.returns[step, :, 0] = last_gae_lam_short + self.values[step, :, 0]
             self.returns[step, :, 1] = last_gae_lam_long + self.values[step, :, 1]
-            
+
+            self.advantages_short[step] = last_gae_lam_short
+            self.advantages_long[step] = last_gae_lam_long
             self.advantages[step] = last_gae_lam_short + last_gae_lam_long
 
     def _get_samples(self, batch_inds: np.ndarray, env: Optional[Any] = None) -> RolloutBufferSamples:
