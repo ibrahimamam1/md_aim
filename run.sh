@@ -55,7 +55,9 @@ function run_experiment() {
 }
 
 # run_experiment <gamma_short> <gamma_long>
-run_experiment 0.90  0.999
-run_experiment 0.95  0.999
-run_experiment 0.99  0.999
-run_experiment 0.999 0.999
+run_experiment 0.90  0.99
+run_experiment 0.925  0.99
+run_experiment 0.95  0.99
+run_experiment 0.975  0.99
+run_experiment 0.99  0.99
+run_experiment 0.999 0.99
