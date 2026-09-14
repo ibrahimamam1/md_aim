@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# ==============================================================================
+# run.sh
+# Entry point delegating to scripts/run_all_experiments.sh
+# ==============================================================================
+
 set -e
 
 # Ensure we run from the project root directory
@@ -61,3 +66,4 @@ run_experiment 0.95  0.99
 run_experiment 0.975  0.99
 run_experiment 0.99  0.99
 run_experiment 0.999 0.99
+exec bash scripts/run_all_experiments.sh "$@"
