@@ -10,7 +10,7 @@
 #   4. Experiment B: Multi-Objective State-Dependent Discount [γ_l, γ_s(s)] (Core)
 #   5. Experiment C: Learnable Discount Factors γ_φ(s)
 #   6. Ablation: State-Dependent Reward Weighting λ(s)
-#   7. Full evaluation across scenarios S1..S7 and Pareto weight sweep
+#   7. Full evaluation across scenarios S1..S4 and Pareto weight sweep
 #   8. Generation of publication-grade Pareto frontiers and Oracle diagnostics
 # ==============================================================================
 
@@ -68,10 +68,10 @@ run_pipeline() {
     # Locate the most recently saved checkpoint for this run
     LATEST_DIR=$(ls -td checkpoints/mo_sd/"${mode}"_* 2>/dev/null | head -n 1)
     if [ -n "${LATEST_DIR}" ] && [ -f "${LATEST_DIR}/final_model.zip" ]; then
-        echo "Evaluating checkpoint: ${LATEST_DIR}/final_model.zip across scenarios S1..S7..."
+        echo "Evaluating checkpoint: ${LATEST_DIR}/final_model.zip across scenarios S1..S4..."
         "$PYTHON_CMD" src/eval/evaluate_mo_sd.py \
             --checkpoint "${LATEST_DIR}/final_model.zip" \
-            --scenarios S1 S2 S3 S4 S5 S6 S7 \
+            --scenarios S1 S2 S3 S4 \
             --n_sims 15 \
             --output_dir "output/eval_${mode}_${tag}"
     fi

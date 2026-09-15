@@ -41,7 +41,7 @@ def parse_args():
     parser.add_argument("--checkpoint", type=str, default=None,
                         help="Path to pretrained model checkpoint (zip) if policy=pretrained.")
     parser.add_argument("--scenarios", nargs="+", default=["S1", "S2", "S3"],
-                        help="Scenarios to evaluate (S1..S7).")
+                        help="Scenarios to evaluate (S1..S4).")
     parser.add_argument("--n_episodes", type=int, default=25,
                         help="Number of episodes per scenario.")
     parser.add_argument("--danger_gap_dist", type=float, default=5.0,

@@ -644,11 +644,11 @@ class AlphaEnv_MO_SD(Env_N):
         # Proximity and TTC safety penalties (strictly zero when vehicles are outside danger threshold)
         safety_gap_penalty = 0.0
         for n in neighbors_info:
-            dist = float(n.get("distance", self.perception_radius))
+            dist = float(n.get("distance", self.danger_distance))
             if dist < self.danger_distance:
                 safety_gap_penalty += -float(1.0 - (dist / self.danger_distance))
 
-        r_gap = float(self.gap_penalty_weight * safety_gap_penalty)
+        distance_gap_penalty = float(self.gap_penalty_weight * safety_gap_penalty)
 
         ttc_penalty = 0.0
         if conflict_info is not None:
@@ -656,7 +656,8 @@ class AlphaEnv_MO_SD(Env_N):
             if min_ttc < self.ttc_threshold:
                 ttc_penalty = -float(self.ttc_penalty_weight * (1.0 - (min_ttc / self.ttc_threshold)))
 
-        r_s = float(r_gap + ttc_penalty)
+        r_gap = float(distance_gap_penalty + ttc_penalty)
+        r_s = float(r_gap + r_col)
         return r_l, r_s, progress_delta, r_prog, r_goal, r_time, r_gap, r_col
 
     def compute_reward(self, agent_id, fail, goal_reached, current_action=None):

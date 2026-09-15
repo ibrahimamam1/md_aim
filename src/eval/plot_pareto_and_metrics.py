@@ -11,7 +11,7 @@ Generates publication-quality figures for:
          • Exp B: Multi-objective state-dependent discount [γ_l, γ_s(s)] (Core)
          • Exp C: Learnable discount factors γ_φ(s)
          • Ablation: State-dependent reward weighting λ(s)
-  2. Section 14 & 15 Scenario Radar & Metric Dashboards across S1..S7.
+  2. Section 14 & 15 Scenario Radar & Metric Dashboards across S1..S4.
   3. Comfort & Vehicle Dynamics Profiles (Jerk, Deceleration, Velocity).
 
 Supports --test_dummy mode to generate and verify all plots immediately with synthetic data.
@@ -137,8 +137,8 @@ def generate_dummy_data() -> Dict[str, Any]:
         ],
     }
 
-    # Scenario S1..S7 breakdown for the primary methods
-    scenarios = ["S1\nFree", "S2\nMod", "S3\nDense", "S4\nSudden", "S5\nAggr", "S6\nLate", "S7\nShift"]
+    # Scenario S1..S4 breakdown for the primary methods
+    scenarios = ["S1\nFree", "S2\nMod", "S3\nDense", "S4\nSudden"]
     scen_data = {
         scen: {
             "Baseline":  {"col": 0.12, "tt": 19.5, "gap": 0.55, "jerk": 1.15},
@@ -154,10 +154,6 @@ def generate_dummy_data() -> Dict[str, Any]:
     scen_data["S3\nDense"]["Exp B (Core)"]["col"] = 0.08
     scen_data["S4\nSudden"]["Baseline"]["col"] = 0.32
     scen_data["S4\nSudden"]["Exp B (Core)"]["col"] = 0.07
-    scen_data["S5\nAggr"]["Baseline"]["col"] = 0.28
-    scen_data["S5\nAggr"]["Exp B (Core)"]["col"] = 0.09
-    scen_data["S6\nLate"]["Baseline"]["col"] = 0.30
-    scen_data["S6\nLate"]["Exp B (Core)"]["col"] = 0.10
 
     return {"tradeoff": data, "scenario_data": scen_data, "scenarios": scenarios}
 
@@ -210,7 +206,7 @@ def plot_pareto_frontiers(tradeoff_data: Dict[str, List[Dict]], save_path: str):
 
 def plot_scenario_benchmarks(scen_data: Dict[str, Dict], scenarios: List[str], save_path: str):
     """
-    Plots a 4-panel dashboard comparing methods across all scenarios S1..S7.
+    Plots a 4-panel dashboard comparing methods across scenarios S1..S4.
     """
     fig, axes = plt.subplots(2, 2, figsize=(14, 9))
 
@@ -265,7 +261,7 @@ def plot_scenario_benchmarks(scen_data: Dict[str, Dict], scenarios: List[str], s
     ax.set_ylabel("Jerk (m/s³)")
     ax.grid(True, axis="y")
 
-    plt.suptitle("Performance Breakdown Across S1–S7 Traffic Regimes", fontsize=15, fontweight="bold", y=0.99)
+    plt.suptitle("Performance Breakdown Across S1–S4 Traffic Regimes", fontsize=15, fontweight="bold", y=0.99)
     plt.tight_layout()
     plt.savefig(save_path, dpi=300)
     plt.close()

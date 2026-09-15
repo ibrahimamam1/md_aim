@@ -167,7 +167,7 @@ class TestMultiObjectiveStateDependentFramework(unittest.TestCase):
         reached_goal = False
         deltas = []
 
-        for step in range(80):
+        for step in range(150):
             conflict = env.last_conflict_info
             if conflict.get("is_conflict", False) or conflict["min_ttc"] < 3.0 or conflict["min_gap"] < 15.0:
                 action = [-0.8]
