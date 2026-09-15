@@ -571,20 +571,18 @@ class AlphaEnv_MO_SD(Env_N):
             min_d_eta = min(min_d_eta, d_eta)
             min_gap = min(min_gap, dist)
 
-            if d_eta < self.d_eta_threshold or ttc_est < self.ttc_threshold:
+            if ttc_est < self.ttc_threshold or dist < self.danger_distance:
                 conflicting_count += 1
 
         is_conflict = (
-            min_d_eta < self.d_eta_threshold
-            or min_ttc < self.ttc_threshold
+            min_ttc < self.ttc_threshold
             or min_gap < self.danger_distance
         )
 
-        d_eta_risk = float(np.exp(-10.0 * min_d_eta)) if min_d_eta < 0.3 else 0.0
         ttc_risk = float(max(0.0, 1.0 - (min_ttc / self.ttc_threshold))) if min_ttc < self.ttc_threshold else 0.0
         gap_risk = float(max(0.0, 1.0 - (min_gap / self.danger_distance))) if min_gap < self.danger_distance else 0.0
 
-        conflict_risk = float(np.clip(max(d_eta_risk, ttc_risk, gap_risk), 0.0, 1.0))
+        conflict_risk = float(np.clip(max(ttc_risk, gap_risk), 0.0, 1.0))
 
         return {
             "is_conflict": bool(is_conflict),
@@ -595,7 +593,7 @@ class AlphaEnv_MO_SD(Env_N):
             "conflicting_neighbors_count": int(conflicting_count),
         }
 
-    def compute_decomposed_reward(self, agent_id, fail, goal_reached, neighbors_info, current_action=None):
+    def compute_decomposed_reward(self, agent_id, fail, goal_reached, neighbors_info, current_action=None, conflict_info=None):
         r_prog = 0.0
         r_goal = 0.0
         r_time = 0.0
@@ -643,14 +641,22 @@ class AlphaEnv_MO_SD(Env_N):
         r_time = -float(self.time_cost)
         r_l = float(r_prog + r_time)
 
+        # Proximity and TTC safety penalties (strictly zero when vehicles are outside danger threshold)
         safety_gap_penalty = 0.0
         for n in neighbors_info:
-            abs_d_eta = abs(float(n.get("d_eta", 1.0)))
-            if abs_d_eta < self.d_eta_threshold:
-                safety_gap_penalty += -float(np.exp(-10.0 * abs_d_eta))
+            dist = float(n.get("distance", self.perception_radius))
+            if dist < self.danger_distance:
+                safety_gap_penalty += -float(1.0 - (dist / self.danger_distance))
 
         r_gap = float(self.gap_penalty_weight * safety_gap_penalty)
-        r_s = float(r_gap)
+
+        ttc_penalty = 0.0
+        if conflict_info is not None:
+            min_ttc = float(conflict_info.get("min_ttc", float("inf")))
+            if min_ttc < self.ttc_threshold:
+                ttc_penalty = -float(self.ttc_penalty_weight * (1.0 - (min_ttc / self.ttc_threshold)))
+
+        r_s = float(r_gap + ttc_penalty)
         return r_l, r_s, progress_delta, r_prog, r_goal, r_time, r_gap, r_col
 
     def compute_reward(self, agent_id, fail, goal_reached, current_action=None):
@@ -661,7 +667,8 @@ class AlphaEnv_MO_SD(Env_N):
 
         r_l, r_s, progress_delta, r_prog, r_goal, r_time, r_gap, r_col = self.compute_decomposed_reward(
             agent_id, fail=fail, goal_reached=goal_reached,
-            neighbors_info=neighbors_info, current_action=current_action
+            neighbors_info=neighbors_info, current_action=current_action,
+            conflict_info=conflict_info
         )
 
         if self.mode == "ablation_reward_adaptation":
@@ -714,7 +721,8 @@ class AlphaEnv_MO_SD(Env_N):
             goal_reached = bool(self.telemetry.get("agent_success", False))
             r_l, r_s, progress_delta, r_prog, r_goal, r_time, r_gap, r_col = self.compute_decomposed_reward(
                 self.agent_id, fail=crashed, goal_reached=goal_reached,
-                neighbors_info=neighbors_info, current_action=action
+                neighbors_info=neighbors_info, current_action=action,
+                conflict_info=conflict_info
             )
             scalar_reward = float(self.weight_l * r_l + self.weight_s * r_s)
 

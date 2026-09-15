@@ -265,6 +265,7 @@ def create_env_factory(args, render=False):
 
     env_mode = "ablation_reward_adaptation" if args.mode == "ablation" else (
         "baseline" if args.mode == "baseline" else "multi_objective"
+        "baseline" if args.mode in ("baseline", "exp_a") else "multi_objective"
     )
 
     def _make():
