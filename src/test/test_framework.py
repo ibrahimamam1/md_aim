@@ -215,6 +215,82 @@ class TestMultiObjectiveStateDependentFramework(unittest.TestCase):
         env.close()
         self.assertTrue(reached_goal, "Test agent should safely reach the goal in scenario S1")
 
+    def test_baseline_uses_standard_sb3_buffer(self):
+        """Verify that in baseline mode, MOSDPPO uses native SB3 RolloutBuffer with gamma_0."""
+        from stable_baselines3.common.buffers import RolloutBuffer
+        from stable_baselines3.common.vec_env import DummyVecEnv
+        import gymnasium as gym
+
+        class MockEnv(gym.Env):
+            def __init__(self):
+                self.observation_space = spaces.Box(-1.0, 1.0, shape=(34,), dtype=np.float32)
+                self.action_space = spaces.Box(-1.0, 1.0, shape=(1,), dtype=np.float32)
+            def reset(self, **kwargs):
+                return np.zeros(34, dtype=np.float32), {}
+            def step(self, a):
+                return np.zeros(34, dtype=np.float32), 1.0, False, False, {}
+
+        vec_env = DummyVecEnv([MockEnv])
+        gamma_test = 0.97
+
+        model = MOSDPPO(
+            policy=MultiObjectiveActorCriticPolicy,
+            env=vec_env,
+            mode="baseline",
+            gamma_0=gamma_test,
+            n_steps=64,
+            batch_size=32,
+        )
+
+        # Ensure buffer is native SB3 RolloutBuffer, not MultiObjectiveRolloutBuffer
+        self.assertIs(type(model.rollout_buffer), RolloutBuffer)
+        self.assertIsNot(type(model.rollout_buffer), MultiObjectiveRolloutBuffer)
+        self.assertEqual(model.critic_dim, 1)
+        self.assertAlmostEqual(model.gamma, gamma_test)
+        self.assertAlmostEqual(model.rollout_buffer.gamma, gamma_test)
+
+    def test_multiobjective_rollout_buffer_samples_are_strictly_1d(self):
+        """Verify that MultiObjectiveRolloutBuffer._get_samples produces strictly 1D tensors, preventing (B, B) broadcasting."""
+        buffer_size = 16
+        batch_size = 8
+        n_envs = 1
+
+        buf = MultiObjectiveRolloutBuffer(
+            buffer_size=buffer_size,
+            observation_space=self.observation_space,
+            action_space=self.action_space,
+            n_envs=n_envs,
+            critic_dim=2,
+        )
+        buf.reset()
+
+        for _ in range(buffer_size):
+            obs = np.random.randn(n_envs, self.obs_dim).astype(np.float32)
+            act = np.random.uniform(-1.0, 1.0, size=(n_envs, 1)).astype(np.float32)
+            rew = np.array([[0.5, -0.2]], dtype=np.float32)
+            starts = np.zeros(n_envs, dtype=np.float32)
+            vals = th.tensor([[0.2, -0.1]], dtype=th.float32)
+            lp = th.tensor([0.1], dtype=th.float32)
+            buf.add(obs, act, rew, starts, vals, lp, gammas=np.array([[0.99, 0.95]]))
+
+        buf.compute_returns_and_advantage(th.tensor([[0.2, -0.1]]), np.zeros(n_envs))
+
+        for sample in buf.get(batch_size=batch_size):
+            # Crucial SB3 1D contracts
+            self.assertEqual(sample.old_log_prob.shape, (batch_size,))
+            self.assertEqual(sample.advantages.shape, (batch_size,))
+            self.assertEqual(sample.returns.shape, (batch_size * 2,))
+            self.assertEqual(sample.old_values.shape, (batch_size * 2,))
+
+            # Verify no broadcasting occurs with policy log_prob
+            mock_policy_log_prob = th.randn(batch_size)
+            diff = mock_policy_log_prob - sample.old_log_prob
+            self.assertEqual(diff.shape, (batch_size,), "Diff must NOT broadcast to (B, B)!")
+            ratio = th.exp(diff)
+            self.assertEqual(ratio.shape, (batch_size,))
+            loss_term = sample.advantages * ratio
+            self.assertEqual(loss_term.shape, (batch_size,))
+
 
 if __name__ == "__main__":
     unittest.main()

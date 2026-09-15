@@ -23,7 +23,7 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.buffers import RolloutBuffer, RolloutBufferSamples
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.vec_env import VecEnv
-from stable_baselines3.common.utils import obs_as_tensor
+from stable_baselines3.common.utils import obs_as_tensor, explained_variance
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from mo_sd_models import MultiObjectiveActorCriticPolicy, LearnableDiscountNet
@@ -191,16 +191,15 @@ class MultiObjectiveRolloutBuffer(RolloutBuffer):
 
     def _get_samples(self, batch_inds: np.ndarray, env: Optional[Any] = None) -> RolloutBufferSamples:
         """
-        Samples a batch. Values and returns retain shape (batch_size, critic_dim) or (batch_size*critic_dim,)
+        Samples a batch. All values, log_probs, advantages, and returns are 1D arrays matching SB3 conventions.
         """
-        flat_inds = batch_inds
         data = (
-            self.observations[flat_inds],
-            self.actions[flat_inds],
-            self.values[flat_inds].flatten() if self.critic_dim > 1 else self.values[flat_inds].squeeze(-1),
-            self.log_probs[flat_inds],
-            self.advantages[flat_inds],
-            self.returns[flat_inds].flatten() if self.critic_dim > 1 else self.returns[flat_inds].squeeze(-1),
+            self.observations[batch_inds],
+            self.actions[batch_inds],
+            self.values[batch_inds].flatten(),
+            self.log_probs[batch_inds].flatten(),
+            self.advantages[batch_inds].flatten(),
+            self.returns[batch_inds].flatten(),
         )
         return RolloutBufferSamples(*tuple(map(self.to_torch, data)))
 
@@ -261,12 +260,20 @@ class MOSDPPO(PPO):
             kwargs["policy_kwargs"] = {}
         kwargs["policy_kwargs"]["critic_dim"] = self.critic_dim
 
+        # Ensure SB3 base class uses gamma_0 for baseline / discounting
+        if "gamma" not in kwargs:
+            kwargs["gamma"] = self.gamma_0
+
         super().__init__(policy, env, *args, **kwargs)
 
     def _setup_model(self) -> None:
         super()._setup_model()
 
-        # Instantiate our custom multi-objective buffer
+        # In baseline mode, keep standard SB3 RolloutBuffer with gamma_0
+        if self.mode == "baseline":
+            return
+
+        # Instantiate our custom multi-objective buffer for state-dependent modes
         self.rollout_buffer = MultiObjectiveRolloutBuffer(
             self.n_steps,
             self.observation_space,
@@ -342,13 +349,18 @@ class MOSDPPO(PPO):
         self,
         env: VecEnv,
         callback: BaseCallback,
-        rollout_buffer: MultiObjectiveRolloutBuffer,
+        rollout_buffer: RolloutBuffer,
         n_rollout_steps: int,
     ) -> bool:
         """
-        Collects experiences, extracts vector rewards and conflict metrics,
-        evaluates state-dependent discounts, and populates the rollout buffer.
+        Collects experiences.
+        When mode == 'baseline', delegates directly to standard SB3 PPO.collect_rollouts.
+        For multi-objective / state-dependent modes, extracts vector rewards and conflict metrics,
+        evaluates state-dependent discounts, and populates the rollout buffer with proper bootstrapping.
         """
+        if self.mode == "baseline":
+            return super().collect_rollouts(env, callback, rollout_buffer, n_rollout_steps)
+
         assert self._last_obs is not None, "No previous observation was provided"
         self.policy.set_training_mode(False)
 
@@ -391,10 +403,20 @@ class MOSDPPO(PPO):
             else:
                 step_rewards = np.array(rewards, dtype=np.float32).reshape((env.num_envs, 1))
 
-            # Suppress SB3's corrupted scalar addition on truncation
-            for info in infos:
-                if "TimeLimit.truncated" in info:
-                    info["TimeLimit.truncated"] = False
+            # Handle timeout by bootstrapping with value function
+            for idx, done in enumerate(dones):
+                if (
+                    done
+                    and infos[idx].get("terminal_observation") is not None
+                    and infos[idx].get("TimeLimit.truncated", False)
+                ):
+                    terminal_obs = self.policy.obs_to_tensor(infos[idx]["terminal_observation"])[0]
+                    with th.no_grad():
+                        terminal_val = self.policy.predict_values(terminal_obs)[0]
+                    if self.critic_dim == 2:
+                        step_rewards[idx] += gammas[idx] * terminal_val.cpu().numpy()
+                    else:
+                        step_rewards[idx] += gammas[idx, 0] * terminal_val.item()
 
             callback.update_locals(locals())
             if callback.on_step() is False:
@@ -430,8 +452,12 @@ class MOSDPPO(PPO):
     def train(self) -> None:
         """
         Updates policy and value parameters using PPO surrogate loss.
+        When mode == 'baseline', delegates directly to standard SB3 PPO.train.
         Also trains LearnableDiscountNet in Exp C.
         """
+        if self.mode == "baseline":
+            return super().train()
+
         self.policy.set_training_mode(True)
         self._update_learning_rate(self.policy.optimizer)
 
@@ -458,10 +484,7 @@ class MOSDPPO(PPO):
                 )
 
                 # Reshape for multi-head values
-                if self.critic_dim > 1:
-                    values = values.flatten()
-                else:
-                    values = values.flatten()
+                values = values.flatten()
 
                 # Normalize advantage
                 advantages = rollout_data.advantages
@@ -511,6 +534,7 @@ class MOSDPPO(PPO):
                 th.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
                 self.policy.optimizer.step()
 
+            self._n_updates += 1
             if not continue_training:
                 break
 
@@ -530,14 +554,17 @@ class MOSDPPO(PPO):
             for k, v in discount_metrics.items():
                 self.logger.record(k, v)
 
-        self._n_updates += self.n_epochs
-        explained_var = self.rollout_buffer.values.flatten()
+        explained_var = explained_variance(self.rollout_buffer.values.flatten(), self.rollout_buffer.returns.flatten())
         self.logger.record("train/n_updates", self._n_updates, exclude="tensorboard")
+        self.logger.record("train/entropy_loss", np.mean(entropy_losses))
         self.logger.record("train/policy_gradient_loss", np.mean(pg_losses))
         self.logger.record("train/value_loss", np.mean(value_losses))
         self.logger.record("train/approx_kl", np.mean(approx_kl_divs))
         self.logger.record("train/clip_fraction", np.mean(clip_fractions))
         self.logger.record("train/loss", loss.item())
+        self.logger.record("train/explained_variance", float(explained_var))
+        if hasattr(self.policy, "log_std"):
+            self.logger.record("train/std", th.exp(self.policy.log_std).mean().item())
 
         # Log component advantages and discounts
         self.logger.record("discount/mean_adv", float(self.rollout_buffer.advantages.mean()))
