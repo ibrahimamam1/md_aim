@@ -48,8 +48,10 @@ class AlphaEnv_MO_SD(Env_N):
         simulator="traci",
         # Efficiency reward parameters
         progress_weight=10.0,
-        time_cost=0.01,
+        waiting_cost=0.01,
+        waiting_speed_threshold=2.0,  # m/s: triggered when vehicle speed < 2.0 m/s
         goal_reward=15.0,
+        time_cost=None,               # backwards-compatibility alias for waiting_cost
         # Safety reward parameters (calibrated to prevent gap penalties exceeding collision)
         gap_penalty_weight=0.25,
         ttc_penalty_weight=0.5,
@@ -97,7 +99,9 @@ class AlphaEnv_MO_SD(Env_N):
         self.last_neighbors_info = []
 
         self.progress_weight = float(progress_weight)
-        self.time_cost = float(time_cost)
+        self.waiting_cost = float(time_cost) if time_cost is not None else float(waiting_cost)
+        self.time_cost = self.waiting_cost
+        self.waiting_speed_threshold = float(waiting_speed_threshold)
         self.goal_reward = float(goal_reward)
 
         self.gap_penalty_weight = float(gap_penalty_weight)
@@ -160,6 +164,7 @@ class AlphaEnv_MO_SD(Env_N):
             # Detailed reward component accumulators
             "reward_progress": 0.0,
             "reward_goal": 0.0,
+            "reward_waiting": 0.0,
             "reward_time": 0.0,
             "reward_gap": 0.0,
             "reward_collision": 0.0,
@@ -596,7 +601,7 @@ class AlphaEnv_MO_SD(Env_N):
     def compute_decomposed_reward(self, agent_id, fail, goal_reached, neighbors_info, current_action=None, conflict_info=None):
         r_prog = 0.0
         r_goal = 0.0
-        r_time = 0.0
+        r_wait = 0.0
         r_gap = 0.0
         r_col = 0.0
         progress_delta = 0.0
@@ -606,7 +611,7 @@ class AlphaEnv_MO_SD(Env_N):
             r_col = -float(self.collision_penalty)
             r_l = 0.0
             r_s = r_col
-            return r_l, r_s, progress_delta, r_prog, r_goal, r_time, r_gap, r_col
+            return r_l, r_s, progress_delta, r_prog, r_goal, r_wait, r_gap, r_col
 
         if goal_reached:
             # Terminal goal reached: vehicle traversed destination edge and left SUMO
@@ -615,10 +620,10 @@ class AlphaEnv_MO_SD(Env_N):
             self.prev_progress = 1.0
             r_prog = float(self.progress_weight * progress_delta)
             r_goal = float(self.goal_reward)
-            r_time = -float(self.time_cost)
-            r_l = float(r_prog + r_goal + r_time)
+            r_wait = 0.0
+            r_l = float(r_prog + r_goal + r_wait)
             r_s = 0.0
-            return r_l, r_s, progress_delta, r_prog, r_goal, r_time, r_gap, r_col
+            return r_l, r_s, progress_delta, r_prog, r_goal, r_wait, r_gap, r_col
 
         if agent_id not in self.k.vehicle.get_ids():
             return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
@@ -638,8 +643,20 @@ class AlphaEnv_MO_SD(Env_N):
         self.prev_progress = progress_norm
 
         r_prog = float(self.progress_weight * progress_delta)
-        r_time = -float(self.time_cost)
-        r_l = float(r_prog + r_time)
+
+        # Waiting penalty: triggered when agent travels below waiting_speed_threshold (2.0 m/s)
+        speed = 0.0
+        if agent_id in self.k.vehicle.get_ids():
+            raw_spd = self.k.vehicle.get_speed(agent_id)
+            if raw_spd is not None and raw_spd >= 0:
+                speed = float(raw_spd)
+
+        if speed < self.waiting_speed_threshold:
+            r_wait = -float(self.waiting_cost)
+        else:
+            r_wait = 0.0
+
+        r_l = float(r_prog + r_wait)
 
         # Proximity and TTC safety penalties (strictly zero when vehicles are outside danger threshold)
         safety_gap_penalty = 0.0
@@ -658,7 +675,7 @@ class AlphaEnv_MO_SD(Env_N):
 
         r_gap = float(distance_gap_penalty + ttc_penalty)
         r_s = float(r_gap + r_col)
-        return r_l, r_s, progress_delta, r_prog, r_goal, r_time, r_gap, r_col
+        return r_l, r_s, progress_delta, r_prog, r_goal, r_wait, r_gap, r_col
 
     def compute_reward(self, agent_id, fail, goal_reached, current_action=None):
         # Called once per step by super().step() in base_env_single
@@ -666,7 +683,7 @@ class AlphaEnv_MO_SD(Env_N):
         conflict_info = self.compute_conflict_features(neighbors_info)
         self.last_conflict_info = conflict_info
 
-        r_l, r_s, progress_delta, r_prog, r_goal, r_time, r_gap, r_col = self.compute_decomposed_reward(
+        r_l, r_s, progress_delta, r_prog, r_goal, r_wait, r_gap, r_col = self.compute_decomposed_reward(
             agent_id, fail=fail, goal_reached=goal_reached,
             neighbors_info=neighbors_info, current_action=current_action,
             conflict_info=conflict_info
@@ -687,7 +704,8 @@ class AlphaEnv_MO_SD(Env_N):
             "progress_delta": progress_delta,
             "r_progress": r_prog,
             "r_goal": r_goal,
-            "r_time": r_time,
+            "r_waiting": r_wait,
+            "r_time": r_wait,
             "r_gap": r_gap,
             "r_collision": r_col,
             "scalar_reward": scalar_reward,
@@ -707,7 +725,7 @@ class AlphaEnv_MO_SD(Env_N):
             progress_delta = cache["progress_delta"]
             r_prog = cache["r_progress"]
             r_goal = cache["r_goal"]
-            r_time = cache["r_time"]
+            r_wait = cache.get("r_waiting", cache.get("r_time", 0.0))
             r_gap = cache["r_gap"]
             r_col = cache["r_collision"]
             scalar_reward = cache["scalar_reward"]
@@ -720,7 +738,7 @@ class AlphaEnv_MO_SD(Env_N):
             self.last_conflict_info = conflict_info
             crashed = bool(self.telemetry.get("agent_collision", False))
             goal_reached = bool(self.telemetry.get("agent_success", False))
-            r_l, r_s, progress_delta, r_prog, r_goal, r_time, r_gap, r_col = self.compute_decomposed_reward(
+            r_l, r_s, progress_delta, r_prog, r_goal, r_wait, r_gap, r_col = self.compute_decomposed_reward(
                 self.agent_id, fail=crashed, goal_reached=goal_reached,
                 neighbors_info=neighbors_info, current_action=action,
                 conflict_info=conflict_info
@@ -732,14 +750,15 @@ class AlphaEnv_MO_SD(Env_N):
 
         self._update_mo_telemetry(
             action, r_l, r_s, scalar_reward, conflict_info, crashed, goal_reached,
-            progress_delta=progress_delta, r_prog=r_prog, r_goal=r_goal, r_time=r_time, r_gap=r_gap, r_col=r_col
+            progress_delta=progress_delta, r_prog=r_prog, r_goal=r_goal, r_wait=r_wait, r_gap=r_gap, r_col=r_col
         )
 
         infos["vector_reward"] = vector_reward
         infos["reward_dict"] = {
             "progress_reward": float(r_prog),
             "goal_reward": float(r_goal),
-            "time_penalty": float(r_time),
+            "waiting_penalty": float(r_wait),
+            "time_penalty": float(r_wait),
             "gap_penalty": float(r_gap),
             "collision_penalty": float(r_col),
             "total_long_term_reward": float(r_l),
@@ -757,11 +776,12 @@ class AlphaEnv_MO_SD(Env_N):
         return obs, scalar_reward, terminated, truncated, infos
 
     def _update_mo_telemetry(self, action, r_l, r_s, scalar_reward, conflict_info, crashed, goal_reached,
-                             progress_delta=0.0, r_prog=0.0, r_goal=0.0, r_time=0.0, r_gap=0.0, r_col=0.0):
+                             progress_delta=0.0, r_prog=0.0, r_goal=0.0, r_wait=0.0, r_gap=0.0, r_col=0.0):
         self.mo_telemetry["total_steps"] += 1
         self.mo_telemetry["reward_progress"] += float(r_prog)
         self.mo_telemetry["reward_goal"] += float(r_goal)
-        self.mo_telemetry["reward_time"] += float(r_time)
+        self.mo_telemetry["reward_waiting"] += float(r_wait)
+        self.mo_telemetry["reward_time"] += float(r_wait)
         self.mo_telemetry["reward_gap"] += float(r_gap)
         self.mo_telemetry["reward_collision"] += float(r_col)
         self.mo_telemetry["reward_l_total"] += float(r_l)
@@ -830,7 +850,8 @@ class AlphaEnv_MO_SD(Env_N):
             # Explicit Section reward diagnostics
             "progress_reward": float(self.mo_telemetry["reward_progress"]),
             "goal_reward": float(self.mo_telemetry["reward_goal"]),
-            "time_penalty": float(self.mo_telemetry["reward_time"]),
+            "waiting_penalty": float(self.mo_telemetry["reward_waiting"]),
+            "time_penalty": float(self.mo_telemetry["reward_waiting"]),
             "gap_penalty": float(self.mo_telemetry["reward_gap"]),
             "collision_penalty": float(self.mo_telemetry["reward_collision"]),
             "total_long_term_reward": float(self.mo_telemetry["reward_l_total"]),

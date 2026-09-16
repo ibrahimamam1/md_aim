@@ -75,7 +75,9 @@ def parse_args():
     parser.add_argument("--ttc_penalty_weight", type=float, default=0.5, help="Critical TTC penalty weight λ_TTC.")
     parser.add_argument("--progress_weight", type=float, default=10.0, help="Traversal progress reward weight w_p.")
     parser.add_argument("--goal_reward", type=float, default=15.0, help="Terminal goal reward w_g.")
-    parser.add_argument("--time_cost", type=float, default=0.01, help="Per-timestep time cost w_t.")
+    parser.add_argument("--waiting_cost", type=float, default=0.01, help="Per-timestep waiting cost when speed < waiting_speed_threshold.")
+    parser.add_argument("--waiting_speed_threshold", type=float, default=2.0, help="Speed threshold (m/s) below which waiting penalty is applied.")
+    parser.add_argument("--time_cost", type=float, default=None, help="Backwards-compatible alias for --waiting_cost.")
 
     # Ablation reward weighting parameters
     parser.add_argument("--lambda_danger", type=float, default=5.0, help="Safety reward multiplier in conflict.")
@@ -123,7 +125,7 @@ class MOTrafficCallback(BaseCallback):
         # Detailed reward component accumulators
         self._sum_progress_reward = 0.0
         self._sum_goal_reward = 0.0
-        self._sum_time_penalty = 0.0
+        self._sum_waiting_penalty = 0.0
         self._sum_gap_penalty = 0.0
         self._sum_collision_penalty = 0.0
         self._sum_long_term_reward = 0.0
@@ -152,7 +154,7 @@ class MOTrafficCallback(BaseCallback):
             # Reward diagnostics
             self._sum_progress_reward += float(mo_tele.get("progress_reward", 0.0))
             self._sum_goal_reward += float(mo_tele.get("goal_reward", 0.0))
-            self._sum_time_penalty += float(mo_tele.get("time_penalty", 0.0))
+            self._sum_waiting_penalty += float(mo_tele.get("waiting_penalty", mo_tele.get("time_penalty", 0.0)))
             self._sum_gap_penalty += float(mo_tele.get("gap_penalty", 0.0))
             self._sum_collision_penalty += float(mo_tele.get("collision_penalty", 0.0))
             self._sum_long_term_reward += float(mo_tele.get("total_long_term_reward", 0.0))
@@ -175,7 +177,8 @@ class MOTrafficCallback(BaseCallback):
             # Detailed episode reward decomposition logs
             self.logger.record("rewards/progress_reward", self._sum_progress_reward / n)
             self.logger.record("rewards/goal_reward", self._sum_goal_reward / n)
-            self.logger.record("rewards/time_penalty", self._sum_time_penalty / n)
+            self.logger.record("rewards/waiting_penalty", self._sum_waiting_penalty / n)
+            self.logger.record("rewards/time_penalty", self._sum_waiting_penalty / n)
             self.logger.record("rewards/gap_penalty", self._sum_gap_penalty / n)
             self.logger.record("rewards/collision_penalty", self._sum_collision_penalty / n)
             self.logger.record("rewards/total_long_term_reward", self._sum_long_term_reward / n)
@@ -194,7 +197,7 @@ class MOTrafficCallback(BaseCallback):
         self._sum_mean_jerk = 0.0
         self._sum_progress_reward = 0.0
         self._sum_goal_reward = 0.0
-        self._sum_time_penalty = 0.0
+        self._sum_waiting_penalty = 0.0
         self._sum_gap_penalty = 0.0
         self._sum_collision_penalty = 0.0
         self._sum_long_term_reward = 0.0
@@ -291,7 +294,8 @@ def create_env_factory(args, render=False):
             ttc_penalty_weight=args.ttc_penalty_weight,
             progress_weight=args.progress_weight,
             goal_reward=args.goal_reward,
-            time_cost=args.time_cost,
+            waiting_cost=args.waiting_cost if args.time_cost is None else args.time_cost,
+            waiting_speed_threshold=args.waiting_speed_threshold,
         )
         return Monitor(env)
 

@@ -228,7 +228,7 @@ def run_calibration():
 
                 r_prog = float(mo_tele.get("progress_reward", 0.0))
                 r_goal = float(mo_tele.get("goal_reward", 0.0))
-                r_time = float(mo_tele.get("time_penalty", 0.0))
+                r_time = float(mo_tele.get("waiting_penalty", mo_tele.get("time_penalty", 0.0)))
                 r_gap = float(mo_tele.get("gap_penalty", 0.0))
                 r_col = float(mo_tele.get("collision_penalty", 0.0))
                 r_l = float(mo_tele.get("total_long_term_reward", 0.0))

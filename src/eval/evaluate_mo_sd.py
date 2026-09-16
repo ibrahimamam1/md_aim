@@ -34,7 +34,7 @@ CSV_HEADER = [
     "run", "scenario", "weight_l", "weight_s", "collision", "success",
     "avg_speed", "min_safe_gap", "min_ttc", "emergency_braking_count", "near_collision_count",
     "traversal_time", "waiting_time", "stops_count", "max_deceleration", "mean_abs_jerk", "jerk_variance",
-    "progress_reward", "goal_reward", "time_penalty", "gap_penalty", "collision_penalty",
+    "progress_reward", "goal_reward", "waiting_penalty", "time_penalty", "gap_penalty", "collision_penalty",
     "total_long_term_reward", "total_safety_reward", "total_reward",
     "time_profile", "distance_profile", "velocity_profile", "jerk_profile", "acceleration_profile"
 ]
@@ -155,7 +155,8 @@ def evaluate():
                         "jerk_variance": f"{mo_telemetry.get('jerk_variance', 0.0):.4f}",
                         "progress_reward": f"{mo_telemetry.get('progress_reward', 0.0):.4f}",
                         "goal_reward": f"{mo_telemetry.get('goal_reward', 0.0):.4f}",
-                        "time_penalty": f"{mo_telemetry.get('time_penalty', 0.0):.4f}",
+                        "waiting_penalty": f"{mo_telemetry.get('waiting_penalty', mo_telemetry.get('time_penalty', 0.0)):.4f}",
+                        "time_penalty": f"{mo_telemetry.get('time_penalty', mo_telemetry.get('waiting_penalty', 0.0)):.4f}",
                         "gap_penalty": f"{mo_telemetry.get('gap_penalty', 0.0):.4f}",
                         "collision_penalty": f"{mo_telemetry.get('collision_penalty', 0.0):.4f}",
                         "total_long_term_reward": f"{mo_telemetry.get('total_long_term_reward', 0.0):.4f}",
