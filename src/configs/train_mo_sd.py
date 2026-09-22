@@ -74,7 +74,7 @@ def parse_args():
     parser.add_argument("--gap_penalty_weight", type=float, default=0.25, help="Dangerous proximity gap penalty weight λ_gap.")
     parser.add_argument("--ttc_penalty_weight", type=float, default=0.5, help="Critical TTC penalty weight λ_TTC.")
     parser.add_argument("--progress_weight", type=float, default=10.0, help="Traversal progress reward weight w_p.")
-    parser.add_argument("--goal_reward", type=float, default=15.0, help="Terminal goal reward w_g.")
+    parser.add_argument("--goal_reward", type=float, default=20.0, help="Terminal goal reward w_g.")
     parser.add_argument("--time_cost", type=float, default=0.01, help="Per-timestep time cost w_t.")
 
     # Ablation reward weighting parameters

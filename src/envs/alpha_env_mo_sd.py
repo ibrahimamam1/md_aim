@@ -6,9 +6,13 @@ Directly subclasses Env_N (no legacy v01 dependencies).
 
 Key features:
 1. Decomposed Vector Rewards:
-   - Long-term Efficiency: r_l = w_p * Δp_t - w_t + w_g * I_goal
-   - Short-term Safety:     r_s = -λ_gap * penalty_gap - λ_ttc * φ(TTC_t) - R_c * I_collision
+   - Long-term Efficiency: r_l = Δp_t + waiting_penalty * I[v_ego < v_thresh]
+   - Short-term Safety:     r_s = Σ_neighbors -exp(-|d_eta|)  (only when |d_eta| < 0.2)
+   - Sparse terminals:      r = +20.0 goal reached, fail_penalty (-15.0) collision
    Cleanly passed in info["vector_reward"] = [r_l, r_s] and info["reward_dict"].
+   Scalar reward = r_l + terminal collision penalty; per the research spec the
+   |d_eta| safety term (r_s) is decomposed and logged but deliberately
+   excluded from the returned scalar.
 2. Conflict & Risk State:
    - Computes minimum Time-to-Collision (TTC), normalized arrival time gap |d_eta|,
      and physical separation distance.
@@ -18,8 +22,9 @@ Key features:
      min gap, emergency braking count, unsafe interaction count.
    - Efficiency metrics: traversal time, delay/waiting time, average speed, stops count.
    - Comfort metrics: acceleration variance, max deceleration, jerk, jerk variance.
-4. Reward-Weighting Ablation Support:
-   - r = r_l + λ(s) * r_s for isolating temporal horizon vs reward importance.
+4. Sparse Terminals:
+   - Goal reached: +20.0; collision: fail_penalty (-15.0). No per-step time cost.
+   - Discount experiments (γ(s)) still key off info["conflict_info"] / conflict risk.
 """
 
 import os
@@ -49,7 +54,11 @@ class AlphaEnv_MO_SD(Env_N):
         # Efficiency reward parameters
         progress_weight=10.0,
         time_cost=0.01,
-        goal_reward=15.0,
+        goal_reward=20.0,
+        # Dense scalar reward parameters (potential-based progress + waiting penalty)
+        fail_penalty=-15.0,            # sparse terminal penalty on collision (r <= 0)
+        waiting_penalty=-0.01,         # per-step penalty while ego is (near-)stopped
+        waiting_speed_threshold=2.0,   # ego speed threshold (m/s) for the waiting penalty
         # Safety reward parameters (calibrated to prevent gap penalties exceeding collision)
         gap_penalty_weight=0.25,
         ttc_penalty_weight=0.5,
@@ -100,6 +109,12 @@ class AlphaEnv_MO_SD(Env_N):
         self.time_cost = float(time_cost)
         self.goal_reward = float(goal_reward)
 
+        # Dense scalar reward parameters
+        self.fail_penalty = float(fail_penalty)
+        self.waiting_penalty = float(waiting_penalty)
+        self.waiting_speed_threshold = float(waiting_speed_threshold)
+
+        # Unused by the new scalar scheme (kept for backward compatibility)
         self.gap_penalty_weight = float(gap_penalty_weight)
         self.ttc_penalty_weight = float(ttc_penalty_weight)
         self.collision_penalty = float(collision_penalty)
@@ -184,6 +199,7 @@ class AlphaEnv_MO_SD(Env_N):
         obs, info = super().reset(seed=seed, options=options)
         self.total_route_length = self._compute_route_length(self.agent_id)
         self.prev_progress = 0.0
+        self.last_progress = 0.0
         self.last_valid_distance = 0.0
         self._last_step_cache = None
         info["vector_reward"] = self.last_vector_reward.copy()
@@ -594,6 +610,19 @@ class AlphaEnv_MO_SD(Env_N):
         }
 
     def compute_decomposed_reward(self, agent_id, fail, goal_reached, neighbors_info, current_action=None, conflict_info=None):
+        """
+        Computes the decomposed reward streams for the dual-critic heads.
+
+        Reward scheme (dense scalar, sparse terminals):
+          - Sparse terminals:  +20.0 on goal reached, fail_penalty (-15.0) on collision
+          - Progress:          Δp_t, the per-step change in normalized route progress
+          - Waiting penalty:   waiting_penalty while ego speed < waiting_speed_threshold
+          - Safety (r_s only): Σ_neighbors -exp(-|d_eta|) when |d_eta| < 0.2
+
+        Note: per the research spec, the |d_eta| safety term is decomposed into
+        r_s (for telemetry / info["vector_reward"]) but deliberately EXCLUDED
+        from the returned scalar reward (see compute_reward).
+        """
         r_prog = 0.0
         r_goal = 0.0
         r_time = 0.0
@@ -602,66 +631,93 @@ class AlphaEnv_MO_SD(Env_N):
         progress_delta = 0.0
 
         if fail:
-            # Collision failure: no progress reward, catastrophic crash penalty
-            r_col = -float(self.collision_penalty)
+            # 1. Sparse terminal failure: no dense shaping, fixed penalty
+            r_col = float(self.fail_penalty)
             r_l = 0.0
             r_s = r_col
             return r_l, r_s, progress_delta, r_prog, r_goal, r_time, r_gap, r_col
 
         if goal_reached:
-            # Terminal goal reached: vehicle traversed destination edge and left SUMO
+            # 1. Sparse terminal success: fixed goal reward; close out the
+            # remaining progress so cumulative progress still sums to ~1.0
             prev_p = getattr(self, "prev_progress", 0.0)
             progress_delta = max(0.0, 1.0 - prev_p)
             self.prev_progress = 1.0
-            r_prog = float(self.progress_weight * progress_delta)
             r_goal = float(self.goal_reward)
-            r_time = -float(self.time_cost)
-            r_l = float(r_prog + r_goal + r_time)
+            r_l = r_goal
             r_s = 0.0
             return r_l, r_s, progress_delta, r_prog, r_goal, r_time, r_gap, r_col
 
         if agent_id not in self.k.vehicle.get_ids():
             return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
 
-        # Normal active driving step
+        # 2. Progress reward: potential difference between current progress
+        #    towards the goal and previous progress
         ego_dis = self.k.vehicle.get_distance(agent_id)
-        if ego_dis == -1001 or ego_dis is None:
+        if ego_dis is None or ego_dis == -1001:
             ego_dis = getattr(self, "last_valid_distance", 0.0)
+        elif ego_dis < 0:
+            ego_dis = 0.0
         else:
             self.last_valid_distance = ego_dis
 
-        total_len = max(getattr(self, "total_route_length", 100.0), 1.0)
-        progress_norm = float(np.clip(ego_dis / total_len, 0.0, 1.0))
+        route = self.k.vehicle.get_route(agent_id)
+        if not route:
+            route = self.routes.get(agent_id, [])
 
-        prev_p = getattr(self, "prev_progress", 0.0)
-        progress_delta = max(0.0, progress_norm - prev_p)
+        if route:
+            total_route_length = max(sum(self.k.network.edge_length(e) for e in route), 1e-4)
+        else:
+            total_route_length = 100.0
+
+        progress_norm = float(np.clip(ego_dis / total_route_length, 0.0, 1.0))
+
+        if not hasattr(self, "last_progress") or self.last_progress is None:
+            self.last_progress = progress_norm
+
+        progress_delta = progress_norm - self.last_progress
+        self.last_progress = progress_norm
         self.prev_progress = progress_norm
+        self.prev_distance = ego_dis
+        r_prog = float(progress_delta)
+        r_l = r_prog
 
-        r_prog = float(self.progress_weight * progress_delta)
-        r_time = -float(self.time_cost)
-        r_l = float(r_prog + r_time)
-
-        # Proximity and TTC safety penalties (strictly zero when vehicles are outside danger threshold)
-        safety_gap_penalty = 0.0
+        # 3. Safety penalty: exponential spike as |d_eta| -> 0, applied only
+        #    when neighbors are projected to arrive within a tight window.
+        #    Computed for r_s / telemetry; NOT included in the scalar reward.
+        safety_penalty = 0.0
         for n in neighbors_info:
-            dist = float(n.get("distance", self.danger_distance))
-            if dist < self.danger_distance:
-                safety_gap_penalty += -float(1.0 - (dist / self.danger_distance))
+            abs_d_eta = abs(float(n.get("d_eta", 1.0)))
+            if abs_d_eta < 0.2:
+                safety_penalty += -float(np.exp(-abs_d_eta * 10.0))
+        r_gap = float(safety_penalty)
 
-        distance_gap_penalty = float(self.gap_penalty_weight * safety_gap_penalty)
+        # 4. Fixed waiting penalty: applied when ego speed is below threshold
+        ego_speed = self.k.vehicle.get_speed(agent_id)
+        if ego_speed is None or ego_speed < 0:
+            ego_speed = 0.0
+        waiting_penalty = (
+            float(self.waiting_penalty)
+            if ego_speed < self.waiting_speed_threshold
+            else 0.0
+        )
+        r_time = float(waiting_penalty)
+        r_l += r_time
 
-        ttc_penalty = 0.0
-        if conflict_info is not None:
-            min_ttc = float(conflict_info.get("min_ttc", float("inf")))
-            if min_ttc < self.ttc_threshold:
-                ttc_penalty = -float(self.ttc_penalty_weight * (1.0 - (min_ttc / self.ttc_threshold)))
-
-        r_gap = float(distance_gap_penalty + ttc_penalty)
-        r_s = float(r_gap + r_col)
+        # 5. Decomposed assembly (scalar assembly happens in compute_reward)
+        r_s = r_gap
         return r_l, r_s, progress_delta, r_prog, r_goal, r_time, r_gap, r_col
 
     def compute_reward(self, agent_id, fail, goal_reached, current_action=None):
-        # Called once per step by super().step() in base_env_single
+        """
+        Computes the scalar step reward (called once per step by Env_N.step).
+
+        Dense scalar reward:
+            r = Δp_t + waiting_penalty * I[v_ego < waiting_speed_threshold]
+        Sparse terminal rewards: +goal_reward (20.0) on success, fail_penalty
+        (-15.0) on collision. The |d_eta| safety term (r_s) is decomposed for
+        the dual-critic heads and telemetry but excluded from the scalar.
+        """
         neighbors_info = getattr(self, "last_neighbors_info", []) or []
         conflict_info = self.compute_conflict_features(neighbors_info)
         self.last_conflict_info = conflict_info
@@ -672,14 +728,11 @@ class AlphaEnv_MO_SD(Env_N):
             conflict_info=conflict_info
         )
 
-        if self.mode == "ablation_reward_adaptation":
-            is_conflict = conflict_info.get("is_conflict", False)
-            lam = self.lambda_danger if is_conflict else self.lambda_normal
-            scalar_reward = float(r_l + lam * r_s)
-        elif self.mode == "baseline":
-            scalar_reward = float(r_l + r_s)
-        else:
-            scalar_reward = float(self.weight_l * r_l + self.weight_s * r_s)
+        # Plain scalar matching the research spec: dense progress + waiting,
+        # sparse terminals. The dense |d_eta| safety term (r_s) is logged via
+        # vector_reward/telemetry but NOT added to the returned reward; only
+        # the terminal collision penalty enters from the safety side.
+        scalar_reward = float(r_l + r_col)
 
         self._last_step_cache = {
             "r_l": r_l,
@@ -725,7 +778,7 @@ class AlphaEnv_MO_SD(Env_N):
                 neighbors_info=neighbors_info, current_action=action,
                 conflict_info=conflict_info
             )
-            scalar_reward = float(self.weight_l * r_l + self.weight_s * r_s)
+            scalar_reward = float(r_l + r_col)
 
         vector_reward = np.array([r_l, r_s], dtype=np.float32)
         self.last_vector_reward = vector_reward
@@ -740,7 +793,9 @@ class AlphaEnv_MO_SD(Env_N):
             "progress_reward": float(r_prog),
             "goal_reward": float(r_goal),
             "time_penalty": float(r_time),
+            "waiting_penalty": float(r_time),
             "gap_penalty": float(r_gap),
+            "safety_penalty": float(r_gap),
             "collision_penalty": float(r_col),
             "total_long_term_reward": float(r_l),
             "total_safety_reward": float(r_s),

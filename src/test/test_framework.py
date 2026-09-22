@@ -204,12 +204,14 @@ class TestMultiObjectiveStateDependentFramework(unittest.TestCase):
                     r_s_tot = tele.get("total_safety_reward", 0.0)
                     r_tot = tele.get("total_reward", 0.0)
 
-                    # Check R_l = R_progress + R_goal + R_time
+                    # Check R_l = R_progress + R_goal + R_time (waiting penalty)
                     self.assertAlmostEqual(r_l_tot, r_prog + r_goal + r_time, places=4)
-                    # Check R_s = R_gap + R_collision
+                    # Check R_s = R_gap + R_collision (d_eta safety + terminal fail)
                     self.assertAlmostEqual(r_s_tot, r_gap + r_col, places=4)
-                    # Check scalar total reward = 0.5 * R_l + 0.5 * R_s
-                    self.assertAlmostEqual(r_tot, 0.5 * r_l_tot + 0.5 * r_s_tot, places=4)
+                    # Check scalar total reward = R_l + R_collision (plain scalar:
+                    # dense d_eta safety term is logged in R_s but excluded from
+                    # the returned reward; no 0.5/0.5 Pareto scalarization)
+                    self.assertAlmostEqual(r_tot, r_l_tot + r_col, places=4)
                 break
 
         env.close()

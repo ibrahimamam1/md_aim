@@ -346,7 +346,7 @@ def run_calibration():
     # Calibrated values in alpha_env_mo_sd.py:
     nominal_w_p = 10.0
     nominal_w_t = 0.01
-    nominal_w_g = 15.0
+    nominal_w_g = 20.0
     nominal_lambda_gap = 0.25
     nominal_lambda_ttc = 0.50
     nominal_R_c = 20.0
