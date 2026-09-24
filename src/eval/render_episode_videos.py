@@ -13,15 +13,15 @@ Pipeline
 
 Selection
   - Default: only episodes that ended in COLLISION are rendered.
-  - --timeouts: also render TIMEOUT episodes (collision == 0 AND success == 0);
-    when set, collisions AND timeouts are both rendered.
+  - --timeouts: render ONLY TIMEOUT episodes (collision == 0 AND success == 0);
+    use --all to render everything (collisions, timeouts, successes).
   - --all: render everything including successes.
 
 Examples
     # Render videos for all recorded collisions (default):
     python -m src.eval.render_episode_videos --recordings output/eval_mo_sd/episode_recordings
 
-    # Collisions + timeouts for S3 only, 8 fps:
+    # Timeouts only for S3, 8 fps:
     python -m src.eval.render_episode_videos --recordings output/eval_mo_sd/episode_recordings \
         --scenarios S3 --timeouts --fps 8
 
@@ -370,8 +370,8 @@ def parse_args():
     parser.add_argument("--runs", nargs="+", type=int, default=None,
                         help="Restrict to run indices (e.g. 4 11). Default: all matching outcome.")
     parser.add_argument("--timeouts", action="store_true", default=False,
-                        help="Also render TIMEOUT episodes (collision==0 and success==0). "
-                             "Collisions are always rendered when selected.")
+                        help="Render ONLY TIMEOUT episodes (collision==0 and success==0) "
+                             "instead of collisions. Use --all to render everything.")
     parser.add_argument("--all", dest="render_all", action="store_true", default=False,
                         help="Render every recorded episode including successes.")
     parser.add_argument("--output_dir", type=str, default=None,
@@ -406,9 +406,15 @@ def main():
 
     if args.render_all:
         selected = episodes
+    elif args.timeouts:
+        # --timeouts: timeouts only (no collisions)
+        selected = filter_outcomes(episodes, include_collisions=False,
+                                   include_timeouts=True,
+                                   include_success=False)
     else:
+        # default: collisions only
         selected = filter_outcomes(episodes, include_collisions=True,
-                                   include_timeouts=args.timeouts,
+                                   include_timeouts=False,
                                    include_success=False)
 
     print("\n" + "=" * 76)
@@ -416,7 +422,7 @@ def main():
     print(f" recordings : {recordings_root}")
     print(f" output     : {out_root}")
     print(f" found      : {len(episodes)} episode(s); selected: {len(selected)}")
-    print(f" mode       : {'all' if args.render_all else ('collisions + timeouts' if args.timeouts else 'collisions only')}")
+    print(f" mode       : {'all' if args.render_all else ('timeouts only' if args.timeouts else 'collisions only')}")
     print("=" * 76 + "\n")
 
     if not selected:
