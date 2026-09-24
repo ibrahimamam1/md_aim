@@ -35,8 +35,8 @@ from flow.controllers import RLController, IDMController
 def build_inflows(traffic_rate: Dict[str, float], rl_prob: float = 0.8, warmup_steps: int = 50) -> InFlows:
     """Helper to build InFlows from directional traffic rates (veh/hour).
 
-    Note: the West edge (E#L-X) is the RL agent's spawn edge, so background
-    (NonRL) traffic there is always 0 regardless of traffic_rate["W"].
+    Note: the West edge (E#L-X) is the RL agent's spawn edge, so no
+    background (NonRL) inflow is created there, regardless of traffic_rate["W"].
     """
     inflow = InFlows()
     inflow.add(veh_type="NonRL", edge="E#T-X", probability=traffic_rate["N"] / 3600.0,
@@ -45,9 +45,8 @@ def build_inflows(traffic_rate: Dict[str, float], rl_prob: float = 0.8, warmup_s
                depart_lane=0, depart_speed=0, begin=1, color="green")
     inflow.add(veh_type="NonRL", edge="E#D-X", probability=traffic_rate["S"] / 3600.0,
                depart_lane=0, depart_speed=0, begin=1, color="green")
-    # No background traffic on the ego's spawn edge (West / E#L-X): rate 0.
-    inflow.add(veh_type="NonRL", edge="E#L-X", probability=0.0,
-               depart_lane=0, depart_speed=0, begin=1, color="green")
+    # No background traffic on the ego's spawn edge (West / E#L-X): no
+    # inflow is created there at all.
 
     # RL agent spawns from West edge
     inflow.add(veh_type="RL", edge="E#L-X", probability=rl_prob,
