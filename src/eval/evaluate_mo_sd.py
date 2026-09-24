@@ -28,6 +28,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 
 from src.scenarios.traffic_scenarios import get_scenario_definition, create_scenario_env
 from src.models.mo_sd_ppo import MOSDPPO
+from src.eval.episode_recorder import EpisodeRecorder, update_manifest
 from stable_baselines3.common.vec_env import DummyVecEnv
 
 CSV_HEADER = [
@@ -50,6 +51,12 @@ def parse_args():
                         help="List of efficiency weights w_l to test.")
     parser.add_argument("--render", action="store_true", default=False, help="Render SUMO simulation.")
     parser.add_argument("--output_dir", type=str, default=None, help="Directory to save evaluation results.")
+    parser.add_argument("--record_episodes", dest="record_episodes", action="store_true", default=True,
+                        help="Record per-step ego/vehicle states for later video rendering (default: on).")
+    parser.add_argument("--no_record_episodes", dest="record_episodes", action="store_false",
+                        help="Disable episode recording.")
+    parser.add_argument("--recording_dir", type=str, default=None,
+                        help="Directory for episode recordings (default: <output_dir>/episode_recordings).")
     parser.add_argument("--wandb", action="store_true", default=False, help="Log evaluation metrics to wandb.")
     parser.add_argument("--wandb_project", type=str, default="md_aim", help="Wandb project.")
     return parser.parse_args()
@@ -75,6 +82,11 @@ def evaluate():
 
     out_dir = args.output_dir or os.path.join(root_dir, "output", "eval_mo_sd")
     os.makedirs(out_dir, exist_ok=True)
+
+    recording_dir = None
+    if args.record_episodes:
+        recording_dir = args.recording_dir or os.path.join(out_dir, "episode_recordings")
+        os.makedirs(recording_dir, exist_ok=True)
 
     print("\n" + "=" * 76)
     print(" Multi-Objective Autonomous Intersection Management Evaluation")
@@ -120,6 +132,16 @@ def evaluate():
                     ])
 
                     obs = env.reset()
+                    recorder = None
+                    if recording_dir is not None:
+                        recorder = EpisodeRecorder(
+                            env.envs[0], scenario_id=scen_id, run_index=run_idx,
+                            recording_dir=recording_dir,
+                            metadata={"checkpoint": os.path.basename(checkpoint_path),
+                                      "weight_l": w_l, "weight_s": w_s,
+                                      "mode": "deterministic"},
+                        )
+                        recorder.record_reset()
                     done = False
                     final_info = {}
 
@@ -128,6 +150,10 @@ def evaluate():
                         obs, reward, dones, infos = env.step(action)
                         done = dones[0]
                         final_info = infos[0]
+                        if recorder is not None:
+                            recorder.record_step(action, reward[0], done,
+                                                 infos[0].get("TimeLimit.truncated", False),
+                                                 final_info)
 
                     mo_telemetry = final_info.get("mo_telemetry", {})
                     base_telemetry = final_info.get("telemetry", {})
@@ -172,6 +198,18 @@ def evaluate():
                     print(f"  Run {run_idx:02d} | ERROR: {e}")
 
                 finally:
+                    if recorder is not None:
+                        try:
+                            saved_path = recorder.save()
+                            if saved_path:
+                                collision, success, timeout = recorder.outcome()
+                                update_manifest(recording_dir, scen_id, {
+                                    "file": os.path.relpath(saved_path, recording_dir),
+                                    "run": run_idx, "collision": collision,
+                                    "success": success, "timeout": timeout,
+                                })
+                        except Exception as rec_err:
+                            print(f"  Run {run_idx:02d} | WARNING: recording failed: {rec_err}")
                     if env is not None:
                         try:
                             env.close()

@@ -405,6 +405,7 @@ class AlphaEnv_MO_SD(Env_N):
             delta_eta_norm = np.tanh(delta_eta / 5.0)
 
             neighbors_info.append({
+                "veh_id": other_id,
                 "ego_dist_to_cp_norm": ego_dist_to_cp_norm,
                 "other_dist_to_cp_norm": other_dist_to_cp_norm,
                 "other_speed": other_speed_norm,
