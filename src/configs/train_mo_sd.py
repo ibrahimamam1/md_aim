@@ -221,7 +221,8 @@ def create_env_factory(args, render=False):
                depart_lane=0, depart_speed=0, begin=1, color="green")
     inflow.add(veh_type="NonRL", edge="E#D-X", probability=400.0 / 3600.0,
                depart_lane=0, depart_speed=0, begin=1, color="green")
-    inflow.add(veh_type="NonRL", edge="E#L-X", probability=275.0 / 3600.0,
+    # No background traffic on the RL agent's spawn edge (West / E#L-X): rate 0.
+    inflow.add(veh_type="NonRL", edge="E#L-X", probability=0.0,
                depart_lane=0, depart_speed=0, begin=1, color="green")
     inflow.add(veh_type="RL", edge="E#L-X", probability=0.3,
                depart_lane=0, depart_speed=0, begin=50, color="blue")

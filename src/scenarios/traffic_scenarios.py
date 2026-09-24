@@ -33,7 +33,11 @@ from flow.controllers import RLController, IDMController
 
 
 def build_inflows(traffic_rate: Dict[str, float], rl_prob: float = 0.8, warmup_steps: int = 50) -> InFlows:
-    """Helper to build InFlows from directional traffic rates (veh/hour)."""
+    """Helper to build InFlows from directional traffic rates (veh/hour).
+
+    Note: the West edge (E#L-X) is the RL agent's spawn edge, so background
+    (NonRL) traffic there is always 0 regardless of traffic_rate["W"].
+    """
     inflow = InFlows()
     inflow.add(veh_type="NonRL", edge="E#T-X", probability=traffic_rate["N"] / 3600.0,
                depart_lane=0, depart_speed=0, begin=1, color="green")
@@ -41,7 +45,8 @@ def build_inflows(traffic_rate: Dict[str, float], rl_prob: float = 0.8, warmup_s
                depart_lane=0, depart_speed=0, begin=1, color="green")
     inflow.add(veh_type="NonRL", edge="E#D-X", probability=traffic_rate["S"] / 3600.0,
                depart_lane=0, depart_speed=0, begin=1, color="green")
-    inflow.add(veh_type="NonRL", edge="E#L-X", probability=traffic_rate.get("W", 0.0) / 3600.0,
+    # No background traffic on the ego's spawn edge (West / E#L-X): rate 0.
+    inflow.add(veh_type="NonRL", edge="E#L-X", probability=0.0,
                depart_lane=0, depart_speed=0, begin=1, color="green")
 
     # RL agent spawns from West edge
@@ -82,28 +87,28 @@ def get_scenario_definition(scenario_id: str, root_dir: str) -> Dict[str, Any]:
 
     if scen == "S1":
         # Free flow
-        traffic_rates = {"N": 120, "S": 120, "W": 80, "E": 120}
+        traffic_rates = {"N": 120, "S": 120, "W": 0, "E": 120}
         desc = "S1 — Free flow (low density, large separation gaps)"
 
     elif scen == "S2":
         # Moderate traffic
-        traffic_rates = {"N": 275, "S": 275, "W": 200, "E": 275}
+        traffic_rates = {"N": 275, "S": 275, "W": 0, "E": 275}
         desc = "S2 — Moderate traffic (nominal interaction)"
 
     elif scen == "S3":
         # Dense traffic
-        traffic_rates = {"N": 450, "S": 450, "W": 300, "E": 450}
+        traffic_rates = {"N": 450, "S": 450, "W": 0, "E": 450}
         desc = "S3 — Dense traffic (high volume, multiple interacting vehicles, tight gaps)"
 
     elif scen == "S4":
         # Sudden conflict: heavy crossing flow from South and North
-        traffic_rates = {"N": 500, "S": 500, "W": 100, "E": 200}
+        traffic_rates = {"N": 500, "S": 500, "W": 0, "E": 200}
         non_rl_speed_factor = 1.25
         desc = "S4 — Sudden conflict (rapid cross-traffic entering vehicle trajectory)"
 
     elif scen == "S5":
         # Aggressive/unpredictable traffic
-        traffic_rates = {"N": 350, "S": 350, "W": 150, "E": 350}
+        traffic_rates = {"N": 350, "S": 350, "W": 0, "E": 350}
         non_rl_min_gap = 1.0
         non_rl_tau = 0.4
         non_rl_accel = 4.0
@@ -115,7 +120,7 @@ def get_scenario_definition(scenario_id: str, root_dir: str) -> Dict[str, Any]:
 
     elif scen == "S6":
         # Late-observed conflict (occlusion/restricted sensor range)
-        traffic_rates = {"N": 350, "S": 350, "W": 200, "E": 350}
+        traffic_rates = {"N": 350, "S": 350, "W": 0, "E": 350}
         perception_radius_override = 25.0   # restricted to 25m
         desc = "S6 — Late-observed conflict (occluded view, 25m detection range)"
 
@@ -123,7 +128,7 @@ def get_scenario_definition(scenario_id: str, root_dir: str) -> Dict[str, Any]:
         # Distribution shift: all-way stop junction geometry and uniform random traffic
         net_file = os.path.join(net_dir, "100m_allway_stop_fcfs_junction.net.xml")
         net_class = UniformRandomNetwork
-        traffic_rates = {"N": 300, "S": 300, "W": 250, "E": 300}
+        traffic_rates = {"N": 300, "S": 300, "W": 0, "E": 300}
         desc = "S7 — Distribution shift (unseen junction geometry & priority rules)"
 
     else:
