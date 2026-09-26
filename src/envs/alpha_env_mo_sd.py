@@ -7,7 +7,7 @@ Directly subclasses Env_N (no legacy v01 dependencies).
 Key features:
 1. Decomposed Vector Rewards:
    - Long-term Efficiency: r_l = Δp_t + waiting_penalty * I[v_ego < v_thresh]
-   - Short-term Safety:     r_s = Σ_neighbors -exp(-|d_eta|)  (only when |d_eta| < 0.2)
+   - Short-term Safety:     r_s = Σ_neighbors -exp(-|d_eta|)  (only when |d_eta| < 0.4)
    - Sparse terminals:      r = +20.0 goal reached, fail_penalty (-15.0) collision
    Cleanly passed in info["vector_reward"] = [r_l, r_s] and info["reward_dict"].
    Scalar reward = r_l + terminal collision penalty; per the research spec the
@@ -618,7 +618,7 @@ class AlphaEnv_MO_SD(Env_N):
           - Sparse terminals:  +20.0 on goal reached, fail_penalty (-15.0) on collision
           - Progress:          Δp_t, the per-step change in normalized route progress
           - Waiting penalty:   waiting_penalty while ego speed < waiting_speed_threshold
-          - Safety (r_s only): Σ_neighbors -exp(-|d_eta|) when |d_eta| < 0.2
+          - Safety (r_s only): Σ_neighbors -exp(-|d_eta|) when |d_eta| < 0.4
 
         Note: per the research spec, the |d_eta| safety term is decomposed into
         r_s (for telemetry / info["vector_reward"]) but deliberately EXCLUDED
@@ -689,7 +689,7 @@ class AlphaEnv_MO_SD(Env_N):
         safety_penalty = 0.0
         for n in neighbors_info:
             abs_d_eta = abs(float(n.get("d_eta", 1.0)))
-            if abs_d_eta < 0.2:
+            if abs_d_eta < 0.4:
                 safety_penalty += -float(np.exp(-abs_d_eta * 10.0))
         r_gap = float(safety_penalty)
 
