@@ -7,14 +7,15 @@ Directly subclasses Env_N (no legacy v01 dependencies).
 Key features:
 1. Decomposed Vector Rewards:
    - Long-term Efficiency: r_l = Δp_t + waiting_penalty * I[v_ego < v_thresh]
-   - Short-term Safety:     r_s = Σ_neighbors -exp(-|d_eta|)  (only when |d_eta| < 0.4)
+   - Short-term Safety:     r_s = Σ_neighbors -exp(-|d_eta_s|/0.5)
+                            (raw seconds; active when |d_eta_s| < 2.0 s)
    - Sparse terminals:      r = +20.0 goal reached, fail_penalty (-15.0) collision
    Cleanly passed in info["vector_reward"] = [r_l, r_s] and info["reward_dict"].
    Scalar reward = r_l + terminal collision penalty; per the research spec the
    |d_eta| safety term (r_s) is decomposed and logged but deliberately
    excluded from the returned scalar.
 2. Conflict & Risk State:
-   - Computes minimum Time-to-Collision (TTC), normalized arrival time gap |d_eta|,
+   - Computes minimum Time-to-Collision (TTC), raw arrival time gap |d_eta| (s),
      and physical separation distance.
    - Conflict indicator C(s) ∈ {0, 1} and continuous risk score ρ(s) ∈ [0, 1].
 3. Telemetry:
@@ -35,7 +36,9 @@ from shapely.geometry import Point
 
 # Ensure local imports resolve
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from base_env_single import Env_N
+# "No conflicting neighbor" sentinel for the raw-seconds safety gap (|Δη|),
+# defined in base_env_single (the parent module) and re-exported here.
+from base_env_single import Env_N, D_ETA_SAFE_SENTINEL
 
 
 class AlphaEnv_MO_SD(Env_N):
@@ -76,15 +79,22 @@ class AlphaEnv_MO_SD(Env_N):
         lambda_normal=1.0,
         # Late-observed conflict scenario override (perception radius)
         perception_radius_override=None,
+        # Safety-reward shaping in raw seconds (see compute_decomposed_reward):
+        # active when |Δη| < d_eta_reward_window, decay length
+        # d_eta_reward_decay, amplitude d_eta_reward_gain per neighbor.
+        d_eta_reward_window=2.0,
+        d_eta_reward_decay=0.5,
+        d_eta_reward_gain=1.0,
     ):
         self.prev_pos = dict()
         self.absolute_position = dict()
         self.max_neighbours = 5
         self.perception_radius = float(perception_radius_override) if perception_radius_override is not None else 100.0
 
-        # Ego-centric observation: S_ego = [d_norm, v_norm, sin θ, cos θ] (4 features)
+        # Ego-centric observation: S_ego = [d_goal, v, sin θ, cos θ] (4 features)
         self.ego_obs_features = 4
-        # Per-neighbor: [ego_d_to_cp, other_dist_to_cp, v, other_sin, other_cos] (5 features)
+        # Per-neighbor: [ego_d_to_cp, other_d_to_cp, v, other_sin, other_cos] (5 features)
+        # Raw continuous units: distances in meters, speed in m/s.
         self.neighbour_obs_features = 5
         self.routes = dict()
         self.last_progress = 0.0
@@ -98,8 +108,10 @@ class AlphaEnv_MO_SD(Env_N):
         self.action_space = Box(low=-1.0, high=1.0, shape=(1,), dtype=np.float32)
 
         # Observation space: 4 ego + (5 neighbor_features * 5 max_neighbors) + 5 mask = 34 dims
+        # Raw continuous features: goal distance [0, route_len], CP distances
+        # [0, perception_radius], speeds [0, max_speed], sin/cos [-1, 1].
         total_obs_len = self.ego_obs_features + (self.neighbour_obs_features * self.max_neighbours) + self.max_neighbours
-        self.observation_space = Box(low=-1.0, high=1.0, shape=(total_obs_len,), dtype=np.float32)
+        self.observation_space = Box(low=-1e3, high=1e3, shape=(total_obs_len,), dtype=np.float32)
 
         self.last_action = 0.0
         self.last_obs = np.zeros(self.observation_space.shape[0], dtype=np.float32)
@@ -119,9 +131,10 @@ class AlphaEnv_MO_SD(Env_N):
         self.ttc_penalty_weight = float(ttc_penalty_weight)
         self.collision_penalty = float(collision_penalty)
 
-        self.ttc_threshold = float(ttc_threshold)
-        self.d_eta_threshold = float(d_eta_threshold)
-        self.danger_distance = float(danger_distance)
+        # Conflict thresholds (raw units)
+        self.ttc_threshold = float(ttc_threshold)          # seconds
+        self.d_eta_threshold = float(d_eta_threshold)      # seconds (raw Δη)
+        self.danger_distance = float(danger_distance)      # meters
 
         self.weight_l = float(weight_l)
         self.weight_s = float(weight_s)
@@ -130,12 +143,22 @@ class AlphaEnv_MO_SD(Env_N):
         self.lambda_danger = float(lambda_danger)
         self.lambda_normal = float(lambda_normal)
 
+        # Raw-unit safety shaping: r_s per neighbor = -gain·exp(-|Δη_s|/decay)
+        # when |Δη_s| < window. This reproduces the old normalized shape
+        # (-exp(-10·|Δη_n|), active |Δη_n| < 0.4) almost exactly, since
+        # exp(-10·tanh(Δη_s/5)) ≈ exp(-Δη_s/0.5) and the old cutoff maps to
+        # ~2.1 s of raw Δη. Peak amplitude stays -1.0 per neighbor, preserving
+        # the calibrated gap-vs-collision penalty balance.
+        self.d_eta_reward_window = float(d_eta_reward_window)
+        self.d_eta_reward_decay = float(d_eta_reward_decay)
+        self.d_eta_reward_gain = float(d_eta_reward_gain)
+
         # Cache for step-level metrics
         self.last_vector_reward = np.zeros(2, dtype=np.float32)
         self.last_conflict_info = {
             "is_conflict": False,
             "min_ttc": float("inf"),
-            "min_d_eta": 1.0,
+            "min_d_eta": D_ETA_SAFE_SENTINEL,
             "min_gap": float("inf"),
             "conflict_risk": 0.0,
             "conflicting_neighbors_count": 0,
@@ -151,7 +174,7 @@ class AlphaEnv_MO_SD(Env_N):
             "collision": False,
             "near_collision_count": 0,
             "min_ttc": float("inf"),
-            "min_safe_gap": 1.0,
+            "min_safe_gap": D_ETA_SAFE_SENTINEL,  # min raw |Δη| (s), sentinel = no neighbor
             "min_distance_gap": float("inf"),
             "emergency_braking_count": 0,
             "unsafe_interactions_count": 0,
@@ -191,7 +214,7 @@ class AlphaEnv_MO_SD(Env_N):
         self.last_conflict_info = {
             "is_conflict": False,
             "min_ttc": float("inf"),
-            "min_d_eta": 1.0,
+            "min_d_eta": D_ETA_SAFE_SENTINEL,
             "min_gap": float("inf"),
             "conflict_risk": 0.0,
             "conflicting_neighbors_count": 0,
@@ -277,18 +300,17 @@ class AlphaEnv_MO_SD(Env_N):
             self.last_valid_distance = ego_dis
 
         dis_to_goal = max(0.0, total_route_length - ego_dis)
-        dis_to_goal_norm = np.clip(dis_to_goal / total_route_length, -1.0, 1.0)
 
         ego_speed = max(self.k.vehicle.get_speed(ego_id) or 0.0, 0.0)
         max_speed = self.k.network.max_speed()
-        ego_speed_norm = np.clip(ego_speed / max_speed, -1.0, 1.0)
 
         ego_heading = self.k.vehicle.get_heading(ego_id)
         ego_angle_rad = np.radians((-ego_heading) + 90)
         ego_cos = np.cos(ego_angle_rad)
         ego_sin = np.sin(ego_angle_rad)
 
-        obs_vector = [dis_to_goal_norm, ego_speed_norm, ego_sin, ego_cos]
+        # Raw continuous features: goal distance [m], speed [m/s], sin/cos [-1, 1]
+        obs_vector = [dis_to_goal, ego_speed, ego_sin, ego_cos]
 
         # 2. Neighbor States (Frenet-based)
         neighbors_info = []
@@ -315,7 +337,6 @@ class AlphaEnv_MO_SD(Env_N):
                 continue
 
             other_speed = max(self.k.vehicle.get_speed(other_id) or 0.0, 0.0)
-            other_speed_norm = np.clip(other_speed / max_speed, 0.0, 1.0)
 
             other_heading = self.k.vehicle.get_heading(other_id)
             other_angle_rad = np.radians((-other_heading) + 90)
@@ -396,22 +417,21 @@ class AlphaEnv_MO_SD(Env_N):
                     ego_dist_to_cp = max(0.0, ego_line.project(overlap_start) - ego_pos_on_edge)
                     other_dist_to_cp = max(0.0, other_line.project(overlap_start) - other_pos_on_edge)
 
-            ego_dist_to_cp_norm = np.clip(ego_dist_to_cp / self.perception_radius, 0.0, 1.0)
-            other_dist_to_cp_norm = np.clip(other_dist_to_cp / self.perception_radius, 0.0, 1.0)
+            # Raw continuous values: distances in meters, arrival-time gap in
+            # seconds (Δη = ego ETA − other ETA to the conflict point).
 
             ego_eta = ego_dist_to_cp / max(ego_speed, 0.5)
             other_eta = other_dist_to_cp / max(other_speed, 0.5)
             delta_eta = ego_eta - other_eta
-            delta_eta_norm = np.tanh(delta_eta / 5.0)
 
             neighbors_info.append({
                 "veh_id": other_id,
-                "ego_dist_to_cp_norm": ego_dist_to_cp_norm,
-                "other_dist_to_cp_norm": other_dist_to_cp_norm,
-                "other_speed": other_speed_norm,
+                "ego_dist_to_cp": ego_dist_to_cp,
+                "other_dist_to_cp": other_dist_to_cp,
+                "other_speed": other_speed,
                 "other_sin": other_sin,
                 "other_cos": other_cos,
-                "d_eta": delta_eta_norm,
+                "d_eta": delta_eta,
                 "edge": edge,
                 "distance": distance,
             })
@@ -422,18 +442,23 @@ class AlphaEnv_MO_SD(Env_N):
 
         for neighbor in neighbors_info:
             obs_vector.extend([
-                neighbor["ego_dist_to_cp_norm"],
-                neighbor["other_dist_to_cp_norm"],
+                neighbor["ego_dist_to_cp"],
+                neighbor["other_dist_to_cp"],
                 neighbor["other_speed"],
                 neighbor["other_sin"],
                 neighbor["other_cos"],
             ])
 
-        # Pad missing neighbors
+        # Padding missing neighbors: "far away and stationary" in raw units
+        # (distances = perception radius, speed = 0). The attention mask marks
+        # these slots so the network can ignore them regardless of values.
         num_actual = len(neighbors_info)
         if num_actual < self.max_neighbours:
             for _ in range(self.max_neighbours - num_actual):
-                obs_vector.extend([1.0, 0.0, 1.0, 0.0, 0.0])
+                obs_vector.extend([
+                    self.perception_radius, self.perception_radius,
+                    0.0, 0.0, 0.0,
+                ])
 
         # Attention mask (1.0 for real neighbor, 0.0 for padding)
         neighbor_mask = [1.0] * num_actual + [0.0] * (self.max_neighbours - num_actual)
@@ -549,13 +574,13 @@ class AlphaEnv_MO_SD(Env_N):
             return {
                 "is_conflict": False,
                 "min_ttc": float("inf"),
-                "min_d_eta": 1.0,
+                "min_d_eta": D_ETA_SAFE_SENTINEL,
                 "min_gap": float("inf"),
                 "conflict_risk": 0.0,
                 "conflicting_neighbors_count": 0,
             }
 
-        min_d_eta = 1.0
+        min_d_eta = D_ETA_SAFE_SENTINEL
         min_ttc = float("inf")
         min_gap = float("inf")
         conflicting_count = 0
@@ -565,15 +590,12 @@ class AlphaEnv_MO_SD(Env_N):
             ego_speed = max(self.k.vehicle.get_speed(self.agent_id) or 0.0, 0.0)
 
         for n in neighbors_info:
-            d_eta = abs(float(n.get("d_eta", 1.0)))
+            # Raw units: Δη in seconds, distances in meters, speeds in m/s.
+            d_eta = abs(float(n.get("d_eta", D_ETA_SAFE_SENTINEL)))
             dist = float(n.get("distance", self.perception_radius))
-            ego_d_norm = float(n.get("ego_dist_to_cp_norm", 1.0))
-            other_d_norm = float(n.get("other_dist_to_cp_norm", 1.0))
-            other_speed_norm = float(n.get("other_speed", 0.0))
-
-            ego_dist_cp = ego_d_norm * self.perception_radius
-            other_dist_cp = other_d_norm * self.perception_radius
-            other_speed = other_speed_norm * self.k.network.max_speed()
+            ego_dist_cp = float(n.get("ego_dist_to_cp", self.perception_radius))
+            other_dist_cp = float(n.get("other_dist_to_cp", self.perception_radius))
+            other_speed = float(n.get("other_speed", 0.0))
 
             ego_time_to_cp = ego_dist_cp / max(ego_speed, 0.5)
             other_time_to_cp = other_dist_cp / max(other_speed, 0.5)
@@ -618,7 +640,8 @@ class AlphaEnv_MO_SD(Env_N):
           - Sparse terminals:  +20.0 on goal reached, fail_penalty (-15.0) on collision
           - Progress:          Δp_t, the per-step change in normalized route progress
           - Waiting penalty:   waiting_penalty while ego speed < waiting_speed_threshold
-          - Safety (r_s only): Σ_neighbors -exp(-|d_eta|) when |d_eta| < 0.4
+          - Safety (r_s only): Σ_neighbors -gain·exp(-|Δη|/window) when |Δη| < window
+            (raw seconds; see d_eta_reward_window / d_eta_reward_gain)
 
         Note: per the research spec, the |d_eta| safety term is decomposed into
         r_s (for telemetry / info["vector_reward"]) but deliberately EXCLUDED
@@ -683,14 +706,19 @@ class AlphaEnv_MO_SD(Env_N):
         r_prog = float(progress_delta)
         r_l = r_prog
 
-        # 3. Safety penalty: exponential spike as |d_eta| -> 0, applied only
-        #    when neighbors are projected to arrive within a tight window.
-        #    Computed for r_s / telemetry; NOT included in the scalar reward.
+        # 3. Safety penalty: exponential spike as raw |Δη| (seconds) -> 0,
+        #    applied only when neighbors are projected to arrive within the
+        #    conflict window. Computed for r_s / telemetry; NOT included in
+        #    the scalar reward.
+        #    Shape match with the old normalized form -exp(-10·|Δη_n|)
+        #    (active |Δη_n| < 0.4): since Δη_n = tanh(Δη_s/5),
+        #    exp(-10·Δη_n) ≈ exp(-Δη_s/0.5) and the cutoff maps to ~2.1 s.
         safety_penalty = 0.0
         for n in neighbors_info:
-            abs_d_eta = abs(float(n.get("d_eta", 1.0)))
-            if abs_d_eta < 0.4:
-                safety_penalty += -float(np.exp(-abs_d_eta * 10.0))
+            abs_d_eta = abs(float(n.get("d_eta", D_ETA_SAFE_SENTINEL)))
+            if abs_d_eta < self.d_eta_reward_window:
+                safety_penalty += -self.d_eta_reward_gain * float(
+                    np.exp(-abs_d_eta / self.d_eta_reward_decay))
         r_gap = float(safety_penalty)
 
         # 4. Fixed waiting penalty: applied when ego speed is below threshold
@@ -830,7 +858,7 @@ class AlphaEnv_MO_SD(Env_N):
             self.mo_telemetry["unsafe_interactions_count"] += conflict_info["conflicting_neighbors_count"]
 
         if conflict_info["min_d_eta"] < self.d_eta_threshold or conflict_info["min_ttc"] < 1.5:
-            self.mo_telemetry["near_collision_count"] += 1
+            self.mo_telemetry["near_collision_count"] += 1  # thresholds in raw s
 
         self.mo_telemetry["min_ttc"] = min(self.mo_telemetry["min_ttc"], conflict_info["min_ttc"])
         self.mo_telemetry["min_safe_gap"] = min(self.mo_telemetry["min_safe_gap"], conflict_info["min_d_eta"])

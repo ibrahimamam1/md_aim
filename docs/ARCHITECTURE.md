@@ -75,18 +75,21 @@ builder, conflict model, and reward.
 
 ### 2.2 Observation space
 
-**Heuristic (continuous) variants — 29-dim** `Box(-1, 1)`:
+**Heuristic (continuous) variants — 29-dim** `Box(-1e3, 1e3)` — raw continuous units:
 
 ```
-[ ego ]           4 features:  dis_to_goal_norm, ego_speed_norm, ego_sin, ego_cos
+[ ego ]           4 features:  dis_to_goal [m], ego_speed [m/s], ego_sin, ego_cos
 [ neighbor i ]    5 features each, up to max_neighbours=5, sorted by distance:
-                   ego_dist_to_cp_norm, other_dist_to_cp_norm, other_speed_norm, other_sin, other_cos
-[ padding ]       missing neighbors padded with [1.0, 0.0, 1.0, 0.0, 0.0]
+                   ego_dist_to_cp [m], other_dist_to_cp [m], other_speed [m/s], other_sin, other_cos
+[ padding ]       missing neighbors padded with [perception_radius, perception_radius, 0, 0, 0]
+                  ("far away and stationary"; the attention mask marks these slots)
 ```
 
-where `dis_to_goal_norm = clip((route_len − dist) / route_len, −1, 1)`,
-`ego_speed_norm = clip(v / v_max, −1, 1)`, and the sin/cos are the heading converted from
-SUMO's compass convention (`θ_rad = (−heading + 90)·π/180`).
+where `dis_to_goal = route_len − dist [m]`, `ego_speed [m/s]`, and the sin/cos are the
+heading converted from SUMO's compass convention (`θ_rad = (−heading + 90)·π/180`).
+
+The neighbor arrival-time gap is likewise raw: `d_eta = ego_eta − other_eta` in
+**seconds** (each ETA = distance-to-CP / speed).
 
 **Attention variants — 34-dim**: the same 29 features plus a 5-dim **validity mask**
 (`1.0` for a real neighbor, `0.0` for padding), and a larger `perception_radius = 100 m`
@@ -116,13 +119,15 @@ static `conflict_map` for ego's route pair (§2.5). Vehicles already past the in
 | Goal reached (success) | **+15.0** (terminal) |
 | Collision (crash) | **−10.0** (terminal) |
 | Progress shaping | `+10.0 · Δprogress_norm` per step |
-| Safety penalty | `Σ −exp(−10·\|d_η\|)` for each neighbor with `\|d_η\| < 0.2` |
+| Safety penalty | `Σ −exp(−\|Δη\|/0.5)` for each neighbor with `\|Δη\| < 2.0` (raw seconds) |
 | Time penalty | `−0.01` per step |
 
 - `progress_norm = clip(ego_dist / route_length, 0, 1)`; `Δ` is the per-step increase.
-- `d_η` is the normalized time-gap to a conflict point:
-  `η_v = dist_to_cp / max(v, 0.5)`, `Δη = η_ego − η_other`, `d_η = tanh(Δη / 5) ∈ [−1, 1]`.
-  `|d_η| → 0` means simultaneous arrival at the conflict point (dangerous); `→ 1` is safe.
+- `Δη` is the raw arrival-time gap to a conflict point in **seconds**:
+  `η_v = dist_to_cp / max(v, 0.5)`, `Δη = η_ego − η_other`. `Δη → 0` means simultaneous
+  arrival at the conflict point (dangerous); larger absolute values are safer, with
+  `5.0 s` used as the "no conflicting neighbor" sentinel. The observation and reward
+  both operate on these raw seconds (no tanh normalization).
 - Terminal checks are ordered **crash → goal → departed guard**: a successful agent has
   already been removed from the network by SUMO, so the "not in `get_ids()`" guard must
   come *after* the `goal_reached` check (this ordering was a verified bug fix).

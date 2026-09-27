@@ -47,7 +47,7 @@ def parse_args():
     parser.add_argument("--danger_gap_dist", type=float, default=5.0,
                         help="Distance threshold for I[g_t <= threshold] (meters).")
     parser.add_argument("--danger_d_eta", type=float, default=0.2,
-                        help="Normalized time gap threshold for |d_eta| < threshold.")
+                        help="Raw time gap threshold in seconds for |d_eta| < threshold.")
     parser.add_argument("--danger_ttc", type=float, default=2.0,
                         help="TTC threshold for critical collision imminence (seconds).")
     parser.add_argument("--output_dir", type=str, default=None,
@@ -181,7 +181,7 @@ def run_calibration():
                 sum_unweighted_ttc_penalty = 0.0
                 min_seen_gap = float("inf")
                 min_seen_ttc = float("inf")
-                min_seen_d_eta = 1.0
+                min_seen_d_eta = 5.0  # raw-seconds sentinel (no neighbor)
 
                 while not done:
                     action = select_action(args.policy, obs, model, step)
@@ -192,7 +192,7 @@ def run_calibration():
                     # Step conflict metrics
                     conflict_info = info.get("conflict_info", {})
                     min_ttc = float(conflict_info.get("min_ttc", 99.0))
-                    min_d_eta = float(conflict_info.get("min_d_eta", 1.0))
+                    min_d_eta = float(conflict_info.get("min_d_eta", 5.0))  # raw s
                     min_gap = float(conflict_info.get("min_gap", float("inf")))
 
                     min_seen_gap = min(min_seen_gap, min_gap)
@@ -203,10 +203,11 @@ def run_calibration():
                     if min_gap <= args.danger_gap_dist:
                         count_gap_under_5m += 1
 
-                    # 2. Indicator for dangerous arrival time gap |d_eta| < 0.2
+                    # 2. Indicator for dangerous arrival time gap |d_eta| (raw s)
                     if min_d_eta < args.danger_d_eta:
                         count_d_eta_under_thresh += 1
-                        sum_unweighted_gap_penalty += float(np.exp(-10.0 * min_d_eta))
+                        # Same shape as the env safety term in raw seconds
+                        sum_unweighted_gap_penalty += float(np.exp(-min_d_eta / 0.5))
 
                     # 3. Indicator for critical TTC <= threshold
                     if min_ttc <= args.danger_ttc:
@@ -304,7 +305,7 @@ def run_calibration():
 
     print(f"\n1. Raw Progress Σ_t Δp~_t        : {stats_str(progresses)}")
     print(f"2. Timesteps with g_t <= 5m       : {stats_str(gaps_5m)}")
-    print(f"3. Timesteps with |d_η| < 0.2     : {stats_str(d_etas)}")
+    print(f"3. Timesteps with |d_η| < 0.2s    : {stats_str(d_etas)}")
     print(f"4. Timesteps with TTC <= 2.0s     : {stats_str(ttcs)}")
     print(f"5. Collision Occurrence I_col     : {np.mean(collisions):.1%} ({np.sum(collisions)} / {len(collisions)})")
     print(f"6. Goal Reached Occurrence I_goal : {np.mean(goals):.1%} ({np.sum(goals)} / {len(goals)})")

@@ -14,6 +14,12 @@ from traci.exceptions import TraCIException
 from shapely.geometry import LineString, Point
 import sumolib
 from flow.core.util import ensure_dir
+
+# "No conflicting neighbor" sentinel for the raw-seconds safety gap (|d_eta|).
+# Matches the old normalized "1.0 = safe" convention: with the previous tanh
+# scaling, raw d_eta = 5 s encoded to ~0.76 and anything >= 5 s was treated as
+# fully separated. AlphaEnv_MO_SD re-exports this constant.
+D_ETA_SAFE_SENTINEL = 5.0
 from flow.core.kernel import Kernel
 from flow.utils.exceptions import FatalFlowError
 from shapely.geometry import LineString, Point
@@ -187,7 +193,7 @@ class Env_N(gym.Env, metaclass=ABCMeta):
             "agent_times": [],           # List of times since spawn for every step agent is alive
             "agent_distances": [],       # List of cumulative distance for every step agent is alive
             "agent_jerks": [],           # List of jerk values for every step agent is alive
-            "agent_safe_gaps": [],       # Per-step min |d_eta| to conflicting neighbors (1.0 = safe/no neighbor)
+            "agent_safe_gaps": [],       # Per-step min raw |d_eta| in seconds (D_ETA_SAFE_SENTINEL = no neighbor)
             "agent_waiting_time": 0.0,   # Accumulated time agent speed < 0.1
             "agent_spawn_time": None,    # Time step agent first appeared
             "agent_finish_time": None,   # Time step agent left (success or crash)
@@ -253,9 +259,9 @@ class Env_N(gym.Env, metaclass=ABCMeta):
         """
         Record the per-step safety gap of the RL agent.
 
-        The gap is the minimum absolute normalized time-gap |d_eta| to any
+        The gap is the minimum absolute time-gap |d_eta| in raw seconds to any
         conflicting neighbor in the perception radius:
-            - 1.0  → perfectly separated (or no conflicting neighbor in range)
+            - large (≥ D_ETA_SAFE_SENTINEL) → well separated
             - 0.0  → ego and neighbor arrive at the conflict point simultaneously
         """
         if self.agent_id is None or self.agent_id not in self.k.vehicle.get_ids():
@@ -264,7 +270,7 @@ class Env_N(gym.Env, metaclass=ABCMeta):
         if nbrs:
             gap = min(abs(n['d_eta']) for n in nbrs)
         else:
-            gap = 1.0
+            gap = D_ETA_SAFE_SENTINEL
         self.telemetry["agent_safe_gaps"].append(float(gap))
 
     def _compute_telemetry_stats(self):

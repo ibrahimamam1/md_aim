@@ -1,4 +1,4 @@
-"""Generate a synthetic schema-v2 episode recording for renderer testing.
+"""Generate a synthetic schema-v3 episode recording for renderer testing.
 
 Creates output/eval_mo_sd/episode_recordings/S3TEST/run_9000_coll1_succ0.json
 with a head-on approach scenario: the ego drives east along the west arm and a
@@ -66,29 +66,28 @@ def make_episode():
         ego_d_cp = max(0.0, math.hypot(ego_pos[0], ego_pos[1]) - 3.0)
         nb_d_cp = max(0.0, math.hypot(nb_pos[0], nb_pos[1]) - 3.0)
 
-        # Normalized features exactly as AlphaEnv_MO_SD builds them
-        # d_goal = dis_to_goal / route_length (ego spawns 60 m before the CP)
+        # Raw continuous features exactly as AlphaEnv_MO_SD builds them
+        # (schema v3): goal distance [m], speeds [m/s], CP distances [m],
+        # d_eta in raw seconds.
         ego_dis = max(0.0, ego_pos[0] - EGO_START[0])
-        d_goal_norm = max(0.0, (ROUTE_LEN - ego_dis) / ROUTE_LEN)
-        ego_v_norm = ego["speed"] / MAX_SPEED
+        d_goal_m = max(0.0, ROUTE_LEN - ego_dis)
         ego_h = math.radians(90.0 - ego["heading"])
-        nb_v_norm = nb["speed"] / MAX_SPEED
         nb_h = math.radians(90.0 - nb["heading"])
 
         ego_eta = ego_d_cp / max(ego["speed"], 0.5)
         nb_eta = nb_d_cp / max(nb["speed"], 0.5)
-        d_eta_norm = math.tanh((ego_eta - nb_eta) / 5.0)
+        d_eta_s = ego_eta - nb_eta
 
         slot = [
-            round(min(1.0, ego_d_cp / PERCEPTION), 4),
-            round(min(1.0, nb_d_cp / PERCEPTION), 4),
-            round(nb_v_norm, 4),
+            round(min(PERCEPTION, ego_d_cp), 3),
+            round(min(PERCEPTION, nb_d_cp), 3),
+            round(nb["speed"], 3),
             round(math.sin(nb_h), 4),
             round(math.cos(nb_h), 4),
         ]
-        padding = [1.0, 0.0, 1.0, 0.0, 0.0]   # exact pad pattern of the env
+        padding = [PERCEPTION, PERCEPTION, 0.0, 0.0, 0.0]  # raw-unit pad pattern
         obs = [
-            round(d_goal_norm, 4), round(ego_v_norm, 4),
+            round(d_goal_m, 3), round(ego["speed"], 3),
             round(math.sin(ego_h), 4), round(math.cos(ego_h), 4),
             *slot,                               # slot 0: the real neighbor
             *(padding * 4),                      # slots 1-4: padding
@@ -107,12 +106,12 @@ def make_episode():
             "obs": obs,
             "neighbors_info": [{
                 "veh_id": "flow_1",
-                "ego_dist_to_cp_norm": slot[0],
-                "other_dist_to_cp_norm": slot[1],
+                "ego_dist_to_cp": slot[0],
+                "other_dist_to_cp": slot[1],
                 "other_speed": slot[2],
                 "other_sin": slot[3],
                 "other_cos": slot[4],
-                "d_eta": round(d_eta_norm, 4),
+                "d_eta": round(d_eta_s, 4),
                 "edge": "E#T-X",
                 "distance": round(math.hypot(ego_pos[0] - nb_pos[0],
                                              ego_pos[1] - nb_pos[1]), 2),
@@ -128,7 +127,7 @@ def make_episode():
         nb_pos[1] += nb_vel[1] * SIM_STEP
 
     return {
-        "schema": "md_aim_episode_recording_v2",
+        "schema": "md_aim_episode_recording_v3",
         "scenario_id": "S3TEST",
         "run_index": 9000,
         "collision": 1,

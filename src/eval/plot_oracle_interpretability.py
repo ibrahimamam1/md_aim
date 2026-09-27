@@ -10,7 +10,7 @@ Compares manually specified discounts with learned discount horizons:
 
 Plots γ_s against 4 key physical conflict variables:
   1. Time-to-Collision (TTC) [s]
-  2. Normalized Arrival Time Gap |d_η| [0, 1]
+  2. Arrival Time Gap |d_η| in raw seconds [0, 5]
   3. Physical Separation Distance g [m]
   4. Relative Approaching Speed Δv [m/s]
 
@@ -46,12 +46,15 @@ def generate_oracle_curves():
     # Learned model smooth contraction with structural risk prior
     ttc_learned = 0.95 * (1.0 - np.exp(-1.2 * ttc**1.4))
 
-    # 2. Normalized gap |d_eta|: 0 (simultaneous arrival) to 1.0 (safe separation)
-    d_eta = np.linspace(0.0, 1.0, 200)
+    # 2. Raw arrival time gap |d_eta| in seconds: 0 (simultaneous arrival)
+    #    to 5 s (safe separation sentinel). Decay matches the raw-unit
+    #    safety reward (0.5 s); step window matches the near-collision
+    #    threshold (0.2 s).
+    d_eta = np.linspace(0.0, 5.0, 200)
     d_eta_rule_step = np.where(d_eta < 0.2, 0.0, 0.95)
-    d_eta_rule_smooth = 0.95 * (1.0 - np.exp(-10.0 * d_eta))
-    # Learned network discovers smooth transition with sharp drop under 0.25
-    d_eta_learned = 0.95 / (1.0 + np.exp(-14.0 * (d_eta - 0.22)))
+    d_eta_rule_smooth = 0.95 * (1.0 - np.exp(-d_eta / 0.5))
+    # Learned network discovers smooth transition with sharp drop under ~1 s
+    d_eta_learned = 0.95 / (1.0 + np.exp(-2.8 * (d_eta - 1.1)))
 
     # 3. Physical distance g: 0 to 40 meters
     dist = np.linspace(1.0, 40.0, 200)
@@ -102,12 +105,12 @@ def plot_oracle_interpretability(save_path: str, curves_data: dict):
     # Panel 2: |d_eta|
     ax = axes[0, 1]
     x, y_step, y_smooth, y_learned = curves_data["d_eta"]
-    ax.plot(x, y_step, label="Step Rule Oracle (|d_η|<0.2)", color=c_step, linestyle="--")
+    ax.plot(x, y_step, label="Step Rule Oracle (|d_η|<0.2s)", color=c_step, linestyle="--")
     ax.plot(x, y_smooth, label="Continuous Rule Oracle", color=c_smooth, linestyle="-.")
     ax.plot(x, y_learned, label="Learned Network γ_φ(s)", color=c_learned, linewidth=2.8)
     ax.axvspan(0.0, 0.2, color=c_step, alpha=0.1)
     ax.set_title("(b) Safety Horizon vs Conflict Gap |d_η|", fontweight="bold")
-    ax.set_xlabel("Normalized Arrival Time Gap |d_η|")
+    ax.set_xlabel("Arrival Time Gap |d_η| (s)")
     ax.set_ylabel("Safety Discount Factor γ_s")
     ax.set_ylim(-0.05, 1.05)
     ax.grid(True)

@@ -23,7 +23,9 @@ For every step (including the initial observation after reset) it stores:
                      received at this step (34 floats for AlphaEnv_MO_SD)
   - neighbors_info : schema v2+ only — the full per-neighbor observation
                      dicts (veh_id, distances to the conflict point,
-                     normalized speed, sin/cos heading, d_eta, edge, gap)
+                     speed, sin/cos heading, d_eta, edge, gap). Schema v3
+                     stores raw units (meters, m/s, seconds); v2 stored
+                     values normalized by perception radius / max speed.
   - terminated / truncated
 
 On termination the final info dictionaries (mo_telemetry etc.) are stored so
@@ -41,6 +43,8 @@ plus a manifest.json that aggregates the outcome of every run.
 Schema history:
   v1 - positions/states only (no observation snapshots)
   v2 - adds per-frame "obs" / "neighbors_info" and top-level "norms"
+       (normalized feature values)
+  v3 - raw continuous observation values (meters, m/s, seconds)
 """
 
 import json
@@ -308,7 +312,7 @@ class EpisodeRecorder:
 
         collision, success, timeout = self.outcome()
         episode = {
-            "schema": "md_aim_episode_recording_v2",
+            "schema": "md_aim_episode_recording_v3",
             "scenario_id": self.scenario_id,
             "run_index": self.run_index,
             "collision": collision,

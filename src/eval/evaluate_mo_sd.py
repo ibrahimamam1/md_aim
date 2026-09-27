@@ -169,8 +169,8 @@ def evaluate():
                         "collision": int(mo_telemetry.get("collision", 0)),
                         "success": int(mo_telemetry.get("success", 0)),
                         "avg_speed": f"{mo_telemetry.get('average_speed', 0.0):.4f}",
-                        "min_safe_gap": f"{mo_telemetry.get('min_safe_gap', 1.0):.4f}",
-                        "min_ttc": f"{mo_telemetry.get('min_ttc', 99.0):.4f}",
+                        "min_safe_gap": f"{mo_telemetry.get('min_safe_gap', 5.0):.4f}",  # raw s (5.0 = no neighbor)
+                        "min_ttc": f"{mo_telemetry.get('min_ttc', 99.0):.4f}",  # raw s
                         "emergency_braking_count": int(mo_telemetry.get("emergency_braking_count", 0)),
                         "near_collision_count": int(mo_telemetry.get("near_collision_count", 0)),
                         "traversal_time": f"{mo_telemetry.get('traversal_time', 0.0):.4f}",

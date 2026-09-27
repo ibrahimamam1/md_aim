@@ -11,17 +11,17 @@ Pipeline
      vehicle from its recorded (x, y) position/heading.
   3. Assemble frames into an MP4 with ffmpeg (fallback: mp4 via imageio/FFwriter).
 
-Interpretability (schema v2 recordings)
-  - Vehicles inside the agent's observation are highlighted amber and labeled
-    with their observation slot, ID, speed, acceleration, heading and edge;
-    unobserved vehicles stay red with a compact label.
-  - The ego vehicle is labeled with the exact features the agent sees:
-    normalized / physical goal distance, speed and heading.
-  - A side panel decodes the raw observation vector (4 ego features +
+Interpretability (schema v2+ recordings)
+  - Vehicles inside the agent's observation are highlighted amber with their
+    ID; unobserved vehicles stay red. A red halo marks neighbors inside the
+    conflict window (|Δη| < 2.0 s).
+  - A side panel decodes the observation vector (4 ego features +
     5 neighbor slots × 5 features + attention mask) into human-readable
-    values: distances to the conflict point in meters, speeds in m/s,
-    headings in compass directions, and the Δη (arrival-time gap) per slot,
-    plus a conflict summary and a legend.
+    raw values: distances in meters, speeds in m/s, headings in compass
+    directions, and the Δη arrival-time gap in raw seconds per slot, plus a
+    conflict summary and a legend.
+  - Schema v3 recordings store raw units natively; schema v2 (normalized)
+    recordings are upgraded automatically so both render identically.
   - v1 recordings (no observation snapshots) still render, but without the
     decoded panel; re-run evaluate_mo_sd.py to capture observations.
 
@@ -179,25 +179,76 @@ def resolve_net_file(episode, recordings_root):
 # Observation decoding (AlphaEnv_MO_SD observation space)
 # --------------------------------------------------------------------------- #
 # The observation the agent receives is a flat 34-dim vector:
-#   [0:4]    ego   : [d_goal_norm, v_norm, sin(θ), cos(θ)]
+#   [0:4]    ego   : [d_goal, v, sin(θ), cos(θ)]
 #   [4:29]   5 neighbor slots, each 5 features:
-#            [ego_dist_to_cp_norm, other_dist_to_cp_norm, other_v_norm,
-#             other_sin(θ), other_cos(θ)]
+#            [ego_dist_to_cp, other_dist_to_cp, other_v, other_sin(θ), other_cos(θ)]
 #   [29:34]  attention mask: 1.0 = real neighbor in this slot, 0.0 = padding
-# All distances are normalized by the perception radius (100 m), speeds by the
-# network max speed, and the goal distance by the total route length.
+# Schema v3+ recordings store raw continuous values (meters, m/s, seconds).
+# Schema v2 recordings stored normalized values (goal distance / route_len,
+# CP distances / perception_radius, speeds / max_speed, tanh(Δη / 5 s)); they
+# are upgraded to raw units below so both render identically.
 EGO_FEATURES = 4
 NEIGHBOR_FEATURES = 5
 PAD_TOL = 1e-3
 
 COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
 
+# "No conflicting neighbor" sentinel in raw seconds (matches the env's
+# D_ETA_SAFE_SENTINEL and the old normalized 1.0 = safe convention).
+D_ETA_SAFE_SENTINEL = 5.0
 
-def decode_observation(obs, norms, max_neighbours=5):
+
+def _upgrade_obs_v2_to_raw(obs, norms):
+    """Convert a schema-v2 (normalized) observation vector to raw units.
+
+    v2 conventions: ego d_goal / route_len, CP distances / perception_radius,
+    speeds / max_speed, d_eta = tanh(Δη / 5). Padding slots are [1, 0, 1, 0, 0].
+    """
+    raw = list(obs)
+    max_speed = float(norms.get("max_speed") or 0.0)
+    perception = float(norms.get("perception_radius") or 0.0)
+    route_len = float(norms.get("route_length") or 0.0)
+
+    # Ego: [d_goal, v, sin, cos]
+    if route_len > 0:
+        raw[0] = obs[0] * route_len
+    if max_speed > 0:
+        raw[1] = obs[1] * max_speed
+    for i in range(max_neighbours_from_len(obs)):
+        base = EGO_FEATURES + NEIGHBOR_FEATURES * i
+        was_padding = (
+            abs(obs[base + 0] - 1.0) < PAD_TOL
+            and abs(obs[base + 1] - 0.0) < PAD_TOL
+            and abs(obs[base + 2] - 1.0) < PAD_TOL
+        )
+        if was_padding:
+            raw[base + 0] = perception
+            raw[base + 1] = perception
+            raw[base + 2] = 0.0
+            # sin/cos (base+3, base+4) stay 0.0
+        else:
+            if perception > 0:
+                raw[base + 0] = obs[base + 0] * perception
+                raw[base + 1] = obs[base + 1] * perception
+            if max_speed > 0:
+                raw[base + 2] = obs[base + 2] * max_speed
+    return raw
+
+
+def _max_neighbours_from_len(n):
+    return (n - EGO_FEATURES) // (NEIGHBOR_FEATURES + 1)
+
+
+def max_neighbours_from_len(obs):
+    return _max_neighbours_from_len(len(obs))
+
+
+def decode_observation(obs, norms, max_neighbours=5, schema="v3"):
     """Decode a flat observation vector into a readable dict, or None.
 
     `norms` must contain max_speed, perception_radius and route_length (the
     EpisodeRecorder stores them in the episode's top-level "norms" block).
+    schema="v2" upgrades the vector from normalized to raw units first.
     """
     if obs is None:
         return None
@@ -210,16 +261,19 @@ def decode_observation(obs, norms, max_neighbours=5):
     if len(obs) < expected:
         return None
 
-    max_speed = float(norms.get("max_speed") or 0.0)
-    perception = float(norms.get("perception_radius") or 0.0)
-    route_len = float(norms.get("route_length") or 0.0)
+    if schema == "v2":
+        obs = _upgrade_obs_v2_to_raw(obs, norms)
 
-    d_goal_norm, v_norm, ego_sin, ego_cos = obs[0:4]
+    perception = float(norms.get("perception_radius") or 0.0)
+    # Raw continuous units in schema v3 (and upgraded v2): distances in
+    # meters, speeds in m/s, sin/cos dimensionless.
+    d_goal_m, v_ms, ego_sin, ego_cos = obs[0:4]
     ego = {
-        "d_goal_norm": d_goal_norm,
-        "d_goal_m": d_goal_norm * route_len if route_len > 0 else None,
-        "v_norm": v_norm,
-        "v_ms": v_norm * max_speed if max_speed > 0 else None,
+        "d_goal_m": d_goal_m,
+        "d_goal_norm": (d_goal_m / norms["route_length"]
+                        if norms.get("route_length") else None),
+        "v_ms": v_ms,
+        "v_norm": (v_ms / norms["max_speed"] if norms.get("max_speed") else None),
         "sin": ego_sin,
         "cos": ego_cos,
     }
@@ -232,44 +286,43 @@ def decode_observation(obs, norms, max_neighbours=5):
     for i in range(max_neighbours):
         base = EGO_FEATURES + NEIGHBOR_FEATURES * i
         mask = obs[EGO_FEATURES + NEIGHBOR_FEATURES * max_neighbours + i]
-        # Padding slots are exactly [1, 0, 1, 0, 0]
+        # Padding slots: [perception, perception, 0, 0, 0] in raw units
+        # ([1, 0, 1, 0, 0] in old v2 normalized units).
         is_padding = (
             mask < 0.5
-            and abs(obs[base + 0] - 1.0) < PAD_TOL
-            and abs(obs[base + 1] - 0.0) < PAD_TOL
-            and abs(obs[base + 2] - 1.0) < PAD_TOL
+            and abs(obs[base + 0] - perception) < 1e-6 * max(1.0, perception)
+            and abs(obs[base + 1] - perception) < 1e-6 * max(1.0, perception)
+            and abs(obs[base + 2] - 0.0) < PAD_TOL
         )
-        v_norm_n = obs[base + 2]
+        v_n = obs[base + 2]
         sin_n, cos_n = obs[base + 3], obs[base + 4]
         slots.append({
             "active": bool(mask > 0.5 and not is_padding),
             "padding": bool(is_padding),
-            "ego_d_cp_norm": obs[base + 0],
-            "other_d_cp_norm": obs[base + 1],
-            "v_norm": v_norm_n,
-            "v_ms": v_norm_n * max_speed if max_speed > 0 else None,
+            "ego_d_cp_m": obs[base + 0],
+            "other_d_cp_m": obs[base + 1],
+            "v_ms": v_n,
+            "v_norm": (v_n / norms["max_speed"] if norms.get("max_speed") else None),
             "sin": sin_n,
             "cos": cos_n,
             "heading_deg": (float(np.degrees(np.arctan2(sin_n, cos_n)) % 360.0)
                             if (sin_n != 0.0 or cos_n != 0.0) else None),
-            # distances to the conflict point in meters
-            "ego_d_cp_m": obs[base + 0] * perception if perception > 0 else None,
-            "other_d_cp_m": obs[base + 1] * perception if perception > 0 else None,
         })
     return {"ego": ego, "slots": slots}
 
 
-def _d_eta_seconds(d_eta_norm):
-    """Inverse of the env's tanh(Δη / 5) normalization, in seconds."""
+def _d_eta_seconds(d_eta):
+    """Δη in seconds. v3 recordings store raw seconds; v2 normalized values
+    (tanh(Δη / 5)) are inverted here."""
     try:
-        v = float(d_eta_norm)
+        v = float(d_eta)
     except Exception:
         return None
     if v <= -0.9999:
         return -float("inf")
     if v >= 0.9999:
         return float("inf")
-    return 5.0 * float(np.arctanh(v))
+    return v
 
 
 def _compass(heading_deg):
@@ -294,20 +347,42 @@ def _slot_assignments(fr):
     return slots
 
 
-def _classify_neighbor(fr, slot_idx):
+def _classify_neighbor(fr, slot_idx, schema="v3"):
     """Human-readable encounter relation for one observation slot.
 
-    Uses the same signal the safety term uses: the normalized arrival-time gap
-    Δη to the shared conflict point (|Δη| < 0.4 ≈ conflicting approach).
+    Uses the same signal the safety term uses: the arrival-time gap Δη to the
+    shared conflict point in raw seconds (window = 2.0 s in raw units, which
+    matches the old normalized |Δη| < 0.4 window).
     """
     infos = fr.get("neighbors_info") or []
     info = infos[slot_idx] if slot_idx is not None and slot_idx < len(infos) else None
-    d_eta = _d_eta_seconds(info.get("d_eta")) if isinstance(info, dict) else None
+    if not isinstance(info, dict):
+        return None, "no CP"
+    if schema == "v2":
+        d_eta = _d_eta_seconds_v2(info.get("d_eta"))
+    else:
+        d_eta = _d_eta_seconds(info.get("d_eta"))
     if d_eta is None or d_eta in (float("inf"), float("-inf")):
         return d_eta, "no CP"      # routes do not share a conflict point
-    if abs(d_eta) < 0.4:
+    if abs(d_eta) < D_ETA_REWARD_WINDOW_S:
         return d_eta, "CONFLICT"   # inside the safety-term window
     return d_eta, "lead" if d_eta > 0 else "yield"
+
+
+D_ETA_REWARD_WINDOW_S = 2.0   # raw-seconds safety-reward window (matches env)
+
+
+def _d_eta_seconds_v2(d_eta_norm):
+    """Inverse of the v2 env's tanh(Δη / 5) normalization, in seconds."""
+    try:
+        v = float(d_eta_norm)
+    except Exception:
+        return None
+    if v <= -0.9999:
+        return -float("inf")
+    if v >= 0.9999:
+        return float("inf")
+    return 5.0 * float(np.arctanh(v))
 
 
 # --------------------------------------------------------------------------- #
@@ -348,40 +423,7 @@ def _fmt(v, spec=".1f", none="—"):
     return format(v, spec)
 
 
-def _vehicle_label(veh, slot_idx, relation):
-    """Compact interpretable label for a non-ego vehicle."""
-    parts = [f"#{veh['id']}"]
-    if slot_idx is not None:
-        parts.insert(0, f"slot{slot_idx}")
-    parts.append(f"v={veh['speed']:.1f}")
-    acc = veh.get("accel")
-    if acc is not None and abs(acc) > 0.05:
-        parts.append(f"a={acc:+.1f}")
-    parts.append(f"H={_compass((90.0 - float(veh['heading'])) % 360.0)}")
-    edge = veh.get("edge") or ""
-    if edge:
-        parts.append(edge.replace("E#", ""))
-    label = " ".join(parts)
-    if relation is not None:
-        label += f"  {relation}"
-    return label
-
-
-def _ego_label(ego, decoded):
-    """Interpretable label for the ego vehicle."""
-    lines = [f"EGO  v={ego['speed']:.1f} m/s  a={ego.get('accel', 0.0):+.1f}  "
-             f"H={ego['heading']:.0f}°"]
-    if decoded is not None:
-        e = decoded["ego"]
-        d_goal = _fmt(e["d_goal_m"], ".0f") + "m" if e["d_goal_m"] is not None \
-            else f"{e['d_goal_norm']:.2f} (norm)"
-        v_disp = f"{e['v_ms']:.1f} m/s" if e["v_ms"] is not None else f"{e['v_norm']:.2f} (norm)"
-        lines.append(f"obs: d_goal={d_goal}  v={v_disp}  "
-                     f"θ={_compass(e['heading_deg'])} (sin={e['sin']:+.2f} cos={e['cos']:+.2f})")
-    return lines
-
-
-def _conflict_summary(fr, max_neighbours=5):
+def _conflict_summary(fr, max_neighbours=5, schema="v3"):
     """Derive a compact conflict summary from the recorded neighbor infos."""
     infos = fr.get("neighbors_info") or []
     if not infos:
@@ -391,7 +433,10 @@ def _conflict_summary(fr, max_neighbours=5):
     for n in infos[:max_neighbours]:
         if not isinstance(n, dict):
             continue
-        d_etas.append(_d_eta_seconds(n.get("d_eta")))
+        if schema == "v2":
+            d_etas.append(_d_eta_seconds_v2(n.get("d_eta")))
+        else:
+            d_etas.append(_d_eta_seconds(n.get("d_eta")))
         try:
             gaps.append(float(n.get("distance")))
         except Exception:
@@ -401,7 +446,7 @@ def _conflict_summary(fr, max_neighbours=5):
         return None
     finite = [d for d in d_etas_f if d not in (float("inf"), float("-inf"))]
     min_abs = min((abs(d) for d in finite), default=None)
-    danger = sum(1 for d in d_etas_f if abs(d) < 0.4)
+    danger = sum(1 for d in d_etas_f if abs(d) < D_ETA_REWARD_WINDOW_S)
     min_gap = min(gaps) if gaps else None
     return {
         "min_abs_d_eta": min_abs,
@@ -412,7 +457,7 @@ def _conflict_summary(fr, max_neighbours=5):
 
 
 def _draw_obs_panel(panel_ax, fr, decoded, action_txt, collision, terminated,
-                    max_neighbours=5):
+                    max_neighbours=5, schema="v3"):
     """Side panel: decoded observation, neighbor table, conflict summary, legend."""
     panel_ax.clear()
     panel_ax.set_xlim(0, 1)
@@ -429,7 +474,9 @@ def _draw_obs_panel(panel_ax, fr, decoded, action_txt, collision, terminated,
         y -= lh
 
     # -- Ego observation -----------------------------------------------------
-    line("EGO OBSERVATION", weight="bold", color=EGO_COLOR, mono=False, size=7)
+    ego_id = (fr.get("ego") or {}).get("id", "ego")
+    line(f"EGO OBSERVATION  #{ego_id}", weight="bold", color=EGO_COLOR,
+         mono=False, size=7)
     if decoded is None:
         line("  (v1 recording — no observation snapshot;")
         line("   re-run evaluate_mo_sd.py to capture it)")
@@ -438,8 +485,8 @@ def _draw_obs_panel(panel_ax, fr, decoded, action_txt, collision, terminated,
         d_goal = _fmt(e["d_goal_m"], ".1f") + " m" if e["d_goal_m"] is not None \
             else "n/a"
         v_disp = _fmt(e["v_ms"], ".1f") + " m/s" if e["v_ms"] is not None else "n/a"
-        line(f"  d_goal  {e['d_goal_norm']:+.3f}  ({d_goal})")
-        line(f"  v       {e['v_norm']:+.3f}  ({v_disp})")
+        line(f"  d_goal  {d_goal}  (x{(e['d_goal_norm'] or 0):.3f} of route)")
+        line(f"  v       {v_disp}")
         line(f"  sinθ    {e['sin']:+.3f}   cosθ {e['cos']:+.3f}  "
              f"(H={_compass(e['heading_deg'])})")
 
@@ -463,7 +510,7 @@ def _draw_obs_panel(panel_ax, fr, decoded, action_txt, collision, terminated,
                 line(f"  slot{i}  — padding (masked out)", color="#999999")
                 continue
             any_active = True
-            d_eta, relation = _classify_neighbor(fr, i)
+            d_eta, relation = _classify_neighbor(fr, i, schema=schema)
             relation_txt = relation if relation != "CONFLICT" else "CONFLICT!"
             color = CONFLICT_COLOR if relation == "CONFLICT" else "#222222"
             weight = "bold" if relation == "CONFLICT" else "normal"
@@ -483,24 +530,24 @@ def _draw_obs_panel(panel_ax, fr, decoded, action_txt, collision, terminated,
             line("  (no neighbors in observation — all slots padded)")
 
     # -- Conflict summary ----------------------------------------------------
-    summary = _conflict_summary(fr, max_neighbours=max_neighbours)
+    summary = _conflict_summary(fr, max_neighbours=max_neighbours, schema=schema)
     if summary is not None:
         y -= 0.012
         line("CONFLICT SUMMARY", weight="bold", color=NON_RL_COLOR,
              mono=False, size=7)
         line(f"  observed neighbors : {summary['n_observed']}")
         line(f"  min |Δη|           : {_fmt(summary['min_abs_d_eta'], '.2f')} s "
-             f"(danger window 0.4 s)")
+             f"(danger window {D_ETA_REWARD_WINDOW_S:.1f} s)")
         line(f"  in danger window   : {summary['danger_count']}")
         line(f"  min vehicle gap    : {_fmt(summary['min_gap'], '.1f')} m")
     y -= 0.012
 
     # -- Legend --------------------------------------------------------------
     line("LEGEND", weight="bold", color="#444444", mono=False, size=7)
-    line("  ego vehicle (RL agent)", color=EGO_COLOR)
-    line("  in observation (labeled, slot id)", color=OBSERVED_COLOR)
-    line("  CONFLICT = |Δη| < 0.4 (safety term active)", color=CONFLICT_COLOR)
-    line("  not observed (background traffic)", color=NON_RL_COLOR)
+    line("  #id  ego vehicle (RL agent)", color=EGO_COLOR)
+    line("  #id  in observation (state in panel)", color=OBSERVED_COLOR)
+    line("       red halo = CONFLICT (|Δη| < 2.0 s)", color=CONFLICT_COLOR)
+    line("  #id  not observed (background traffic)", color=NON_RL_COLOR)
     line("  observed = within perception radius on conflicting route")
     line("  slot n = position in the observation vector")
 
@@ -563,7 +610,11 @@ def render_episode(episode_path, out_root, fps, dpi, keep_frames, net_file=None,
     timeout = int(episode.get("timeout", 0))
     outcome_tag = "collision" if collision else ("success" if success else "timeout")
 
-    # Normalization constants for denormalizing the observation (schema v2+)
+    # Recording schema: v3 stores raw continuous values (meters, m/s, seconds);
+    # v2 stored normalized values and is upgraded for display; v1 has none.
+    schema = str(episode.get("schema", "md_aim_episode_recording_v2")).rsplit("_v", 1)[-1]
+
+    # Normalization constants (needed to upgrade v2 recordings; kept for v3)
     norms = dict(episode.get("norms") or {})
     norms.setdefault("perception_radius",
                      float(episode.get("perception_radius", 100.0) or 100.0))
@@ -617,9 +668,11 @@ def render_episode(episode_path, out_root, fps, dpi, keep_frames, net_file=None,
         neighbor_ids = neighbor_ids_per_frame[step] if step < len(neighbor_ids_per_frame) else set()
         slots_by_id = _slot_assignments(fr)
 
-        # Decode this frame's observation once
+        # Decode this frame's observation once (v2 recordings are upgraded
+        # to raw units so old and new render identically)
         decoded = decode_observation(fr.get("obs"), norms,
-                                     max_neighbours=max_neighbours)
+                                     max_neighbours=max_neighbours,
+                                     schema=schema)
 
         for veh in fr.get("vehicles", []):
             vid = str(veh["id"])
@@ -629,7 +682,7 @@ def render_episode(episode_path, out_root, fps, dpi, keep_frames, net_file=None,
             # convention (rad, 0 = east).
             heading_math = np.radians(90.0 - veh["heading"])
             if in_obs:
-                _, relation = _classify_neighbor(fr, slot_idx)
+                _, relation = _classify_neighbor(fr, slot_idx, schema=schema)
                 if relation == "CONFLICT":
                     # red halo so conflicting neighbors pop out
                     ax.add_patch(Circle((veh["x"], veh["y"]), 4.5, fill=False,
@@ -637,17 +690,13 @@ def render_episode(episode_path, out_root, fps, dpi, keep_frames, net_file=None,
                                         alpha=0.9, zorder=4))
                 _draw_vehicle(ax, veh["x"], veh["y"], heading_math, OBSERVED_COLOR,
                               zorder=5)
-                ax.text(veh["x"], veh["y"] - 3.4, _vehicle_label(veh, slot_idx, relation),
-                        fontsize=5.5, ha="center", va="top", color="#222222",
-                        zorder=6,
-                        bbox=dict(boxstyle="round,pad=0.15", facecolor="white",
-                                  edgecolor="#cccccc", alpha=0.75, linewidth=0.3))
             else:
                 _draw_vehicle(ax, veh["x"], veh["y"], heading_math, NON_RL_COLOR,
                               zorder=5)
-                ax.text(veh["x"], veh["y"] - 3.2, f"#{vid} v={veh['speed']:.1f}",
-                        fontsize=5.0, ha="center", va="top", color="#777777",
-                        zorder=6)
+            # Map label: the vehicle id only — every state detail lives in the
+            # observation side panel, keyed by this id.
+            ax.text(veh["x"], veh["y"] - 3.4, f"#{vid}", fontsize=5.5,
+                    ha="center", va="top", color="#333333", zorder=6)
 
         ego = fr.get("ego")
         if ego:
@@ -656,22 +705,10 @@ def render_episode(episode_path, out_root, fps, dpi, keep_frames, net_file=None,
                           length=VEHICLE_LENGTH * 1.1, width=VEHICLE_WIDTH * 1.1, zorder=7)
             ax.add_patch(Circle((ego["x"], ego["y"]), 25.0, fill=False,
                                 edgecolor=EGO_COLOR, linewidth=0.7, alpha=0.5, zorder=2))
-            # Flip the ego label to the side away from nearby observed vehicles
-            # so the two labels never overlap during close encounters.
-            dy = 1.0
-            for veh in fr.get("vehicles", []):
-                if str(veh["id"]) in slots_by_id:
-                    dy = 1.0 if veh["y"] <= ego["y"] else -1.0
-                    break
-            ego_lines = _ego_label(ego, decoded)
-            for k, ln in enumerate(ego_lines):
-                ax.text(ego["x"], ego["y"] + dy * (4.0 + 2.6 * k), ln,
-                        fontsize=6.0 if k else 6.5, ha="center",
-                        va="bottom" if dy > 0 else "top",
-                        color=EGO_COLOR, zorder=6,
-                        bbox=dict(boxstyle="round,pad=0.15", facecolor="white",
-                                  edgecolor=EGO_COLOR, alpha=0.6, linewidth=0.4)
-                        if k == 0 else None)
+            # Map label: id only (details in the side panel).
+            ax.text(ego["x"], ego["y"] + 3.6, f"#{ego.get('id', 'ego')}",
+                    fontsize=5.5, ha="center", va="bottom", color=EGO_COLOR,
+                    zorder=6)
 
         action = fr.get("action")
         action_txt = "—" if action is None else f"{action:+.2f}"
@@ -694,7 +731,7 @@ def render_episode(episode_path, out_root, fps, dpi, keep_frames, net_file=None,
         if panel_ax is not None:
             _draw_obs_panel(panel_ax, fr, decoded, action_txt, collision,
                             bool(fr.get("terminated")),
-                            max_neighbours=max_neighbours)
+                            max_neighbours=max_neighbours, schema=schema)
 
         fig.canvas.draw()
         frame_path = os.path.join(frames_dir, f"frame_{step:06d}.png")

@@ -247,7 +247,7 @@ def plot_scenario_benchmarks(scen_data: Dict[str, Dict], scenarios: List[str], s
     ax.set_title("Minimum Safe Gap |d_η| (Higher is Safer)", fontweight="bold")
     ax.set_xticks(x + bar_width * 2)
     ax.set_xticklabels(scenarios)
-    ax.set_ylabel("Safe Gap |d_η| [0, 1]")
+    ax.set_ylabel("Safe Gap |d_η| (s)")
     ax.grid(True, axis="y")
 
     # 4. Mean Absolute Jerk (m/s³)
