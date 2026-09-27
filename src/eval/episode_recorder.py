@@ -17,16 +17,30 @@ For every step (including the initial observation after reset) it stores:
   - action         : action applied to the ego vehicle at this step
   - reward         : scalar reward returned by the environment
   - neighbors      : ids of the vehicles that actually entered the
-                     observation (info["neighbors"], nearest first)
+                     observation (info["neighbors"], nearest first = slot
+                     order in the observation vector)
+  - obs            : schema v2+ only — the raw observation vector the agent
+                     received at this step (34 floats for AlphaEnv_MO_SD)
+  - neighbors_info : schema v2+ only — the full per-neighbor observation
+                     dicts (veh_id, distances to the conflict point,
+                     normalized speed, sin/cos heading, d_eta, edge, gap)
   - terminated / truncated
 
 On termination the final info dictionaries (mo_telemetry etc.) are stored so
 the renderer can filter by outcome (collision / timeout / success) exactly
 the way evaluate_mo_sd.py classifies runs.
 
+A top-level "norms" block (max_speed, perception_radius, route_length) is
+stored so render_episode_videos.py can denormalize the observation.
+so render_episode_videos.py can denormalize the observation for display.
+
 Output is one JSON file per episode:
     <recording_dir>/<scenario>/run_<nnnn>_coll<0|1>_succ<0|1>.json
 plus a manifest.json that aggregates the outcome of every run.
+
+Schema history:
+  v1 - positions/states only (no observation snapshots)
+  v2 - adds per-frame "obs" / "neighbors_info" and top-level "norms"
 """
 
 import json
@@ -63,10 +77,74 @@ class EpisodeRecorder:
         self.frames = []
         self._final_infos = None
         self._stopped = False
+        self._norms = None
 
     # ------------------------------------------------------------------ #
     # Capture
     # ------------------------------------------------------------------ #
+    def _compute_norms(self):
+        """Normalization constants needed to denormalize the observation."""
+        env = self.env
+        norms = {"max_speed": 0.0, "perception_radius": 0.0, "route_length": 0.0}
+        try:
+            norms["max_speed"] = float(env.k.network.max_speed())
+        except Exception:
+            pass
+        try:
+            norms["perception_radius"] = float(
+                getattr(env, "perception_radius", 0.0) or 0.0)
+        except Exception:
+            pass
+        try:
+            route_len = getattr(env, "total_route_length", None)
+            if route_len:
+                norms["route_length"] = float(route_len)
+        except Exception:
+            pass
+        return norms
+
+    def _observation_snapshot(self):
+        """Raw observation vector + neighbor infos for offline decoding.
+
+        The renderer (render_episode_videos.py) uses this to display the exact
+        observation the agent saw at each step with human-readable labels.
+        Reads the env's cached last_obs / last_neighbors_info, which are the
+        outputs of get_state() for the current step.
+        """
+        env = self.env
+        obs_list = []
+        obs = getattr(env, "last_obs", None)
+        if obs is not None:
+            try:
+                if hasattr(obs, "flatten"):
+                    obs_list = [float(v) for v in obs.flatten()]
+                elif isinstance(obs, (list, tuple)):
+                    obs_list = [float(v) for v in obs]
+                else:
+                    obs_list = [float(obs)]
+            except Exception:
+                obs_list = []
+
+        neighbors_info = []
+        for n in getattr(env, "last_neighbors_info", None) or []:
+            if not isinstance(n, dict):
+                continue
+            try:
+                entry = {}
+                for k, v in n.items():
+                    if isinstance(v, bool):
+                        entry[str(k)] = bool(v)
+                    elif isinstance(v, (int, float)):
+                        entry[str(k)] = float(v) if v == v else 0.0
+                    else:
+                        entry[str(k)] = str(v)
+                neighbors_info.append(entry)
+            except Exception:
+                continue
+
+        if self._norms is None:
+            self._norms = self._compute_norms()
+        return {"obs": obs_list, "neighbors_info": neighbors_info}
     def _vehicle_states(self):
         """Position/state of every vehicle currently in the network."""
         env = self.env
@@ -152,6 +230,7 @@ class EpisodeRecorder:
         self.frames = []
         self._final_infos = None
         self._stopped = False
+        last_nb = getattr(self.env, "last_neighbors_info", None) or []
         snapshot = {
             "t": float(getattr(self.env, "time_counter", 0.0)),
             "step": 0,
@@ -159,16 +238,20 @@ class EpisodeRecorder:
             "vehicles": self._vehicle_states(),
             "action": None,
             "reward": 0.0,
-            "neighbors": [],
+            "neighbors": [
+                str(n.get("veh_id")) for n in last_nb
+                if isinstance(n, dict) and n.get("veh_id") is not None
+            ],
             "terminated": False,
             "truncated": False,
         }
+        snapshot.update(self._observation_snapshot())
         self.frames.append(snapshot)
 
     def record_step(self, action, reward, terminated, truncated, info=None):
         """Snapshot after env.step()."""
         info = info or {}
-        self.frames.append({
+        frame = {
             "t": float(getattr(self.env, "time_counter", 0.0)),
             "step": len(self.frames),
             "ego": self._ego_state(),
@@ -178,7 +261,9 @@ class EpisodeRecorder:
             "neighbors": self._neighbor_ids(info),
             "terminated": bool(terminated),
             "truncated": bool(truncated),
-        })
+        }
+        frame.update(self._observation_snapshot())
+        self.frames.append(frame)
         if terminated or truncated:
             self._final_infos = dict(info)
 
@@ -223,7 +308,7 @@ class EpisodeRecorder:
 
         collision, success, timeout = self.outcome()
         episode = {
-            "schema": "md_aim_episode_recording_v1",
+            "schema": "md_aim_episode_recording_v2",
             "scenario_id": self.scenario_id,
             "run_index": self.run_index,
             "collision": collision,
@@ -232,6 +317,7 @@ class EpisodeRecorder:
             "sim_step": float(getattr(self.env, "sim_step", 0.25)),
             "perception_radius": float(getattr(self.env, "perception_radius", 100.0)),
             "max_neighbours": int(getattr(self.env, "max_neighbours", 5)),
+            "norms": dict(self._norms or {}),
             "metadata": self.metadata,
             "final_info": _jsonable(self._final_infos or {}),
             "frames": self.frames,
