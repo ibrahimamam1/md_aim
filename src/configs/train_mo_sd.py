@@ -83,9 +83,9 @@ def parse_args():
 
     # Training hyperparameters
     parser.add_argument("--timesteps", type=int, default=1000000, help="Total training timesteps.")
-    parser.add_argument("--num_workers", type=int, default=8, help="Number of parallel env workers.")
-    parser.add_argument("--n_steps", type=int, default=1024, help="Steps per rollout per worker.")
-    parser.add_argument("--batch_size", type=int, default=256, help="Minibatch size.")
+    parser.add_argument("--num_workers", type=int, default=24, help="Number of parallel env workers.")
+    parser.add_argument("--n_steps", type=int, default=512, help="Steps per rollout per worker.")
+    parser.add_argument("--batch_size", type=int, default=128, help="Minibatch size.")
     parser.add_argument("--learning_rate", type=float, default=3e-4, help="Initial learning rate.")
     parser.add_argument("--min_learning_rate", type=float, default=1e-5, help="Floor learning rate.")
     parser.add_argument("--seed", type=int, default=42, help="Random seed.")
@@ -382,7 +382,7 @@ def main():
         learning_rate=linear_schedule(args.learning_rate, args.min_learning_rate),
         n_steps=args.n_steps,
         batch_size=args.batch_size,
-        n_epochs=10,
+        n_epochs=4,
         gae_lambda=0.95,
         clip_range=0.25,
         max_grad_norm=0.5,
