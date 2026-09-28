@@ -16,6 +16,11 @@ For every step (including the initial observation after reset) it stores:
                      recomputed offline)
   - action         : action applied to the ego vehicle at this step
   - reward         : scalar reward returned by the environment
+  - reward_dict    : schema v3+ only — per-step reward decomposition from
+                     info["reward_dict"] (progress_reward, safety_penalty,
+                     goal_reward, time_penalty, gap_penalty, collision_penalty,
+                     r_l, r_s, scalar_reward). Older recordings simply omit
+                     the key; the renderer falls back to "—".
   - neighbors      : ids of the vehicles that actually entered the
                      observation (info["neighbors"], nearest first = slot
                      order in the observation vector)
@@ -242,6 +247,7 @@ class EpisodeRecorder:
             "vehicles": self._vehicle_states(),
             "action": None,
             "reward": 0.0,
+            "reward_dict": None,
             "neighbors": [
                 str(n.get("veh_id")) for n in last_nb
                 if isinstance(n, dict) and n.get("veh_id") is not None
@@ -255,6 +261,9 @@ class EpisodeRecorder:
     def record_step(self, action, reward, terminated, truncated, info=None):
         """Snapshot after env.step()."""
         info = info or {}
+        rd = info.get("reward_dict")
+        rd = {str(k): _jsonable(v) for k, v in rd.items()} \
+            if isinstance(rd, dict) else None
         frame = {
             "t": float(getattr(self.env, "time_counter", 0.0)),
             "step": len(self.frames),
@@ -262,6 +271,7 @@ class EpisodeRecorder:
             "vehicles": self._vehicle_states(),
             "action": None if action is None else float(np_flatten(action)),
             "reward": float(reward if reward is not None else 0.0),
+            "reward_dict": rd,
             "neighbors": self._neighbor_ids(info),
             "terminated": bool(terminated),
             "truncated": bool(truncated),

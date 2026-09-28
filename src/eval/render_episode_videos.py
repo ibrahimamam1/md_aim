@@ -608,7 +608,6 @@ def render_episode(episode_path, out_root, fps, dpi, keep_frames, net_file=None,
     collision = int(episode.get("collision", 0))
     success = int(episode.get("success", 0))
     timeout = int(episode.get("timeout", 0))
-    outcome_tag = "collision" if collision else ("success" if success else "timeout")
 
     # Recording schema: v3 stores raw continuous values (meters, m/s, seconds);
     # v2 stored normalized values and is upgraded for display; v1 has none.
@@ -712,13 +711,16 @@ def render_episode(episode_path, out_root, fps, dpi, keep_frames, net_file=None,
 
         action = fr.get("action")
         action_txt = "—" if action is None else f"{action:+.2f}"
-        colliding = "YES" if (collision and fr.get("terminated")) else "no"
-        n_obs = len(slots_by_id)
+        # Per-step reward decomposition (progress + safety), persisted by the
+        # recorder from info["reward_dict"]. Older recordings without the key
+        # show "—".
+        rd = fr.get("reward_dict") or {}
+        r_prog = _fmt(rd.get("progress_reward"), "+.4f")
+        r_safety = _fmt(rd.get("safety_penalty"), "+.4f")
         ax.set_title(
-            f"Scenario {scen} | {stem} | {outcome_tag.upper()}  "
             f"t={fr['t']:.2f}s step={step}  action={action_txt}  "
-            f"reward={fr.get('reward', 0.0):+.3f}  collision={colliding}  "
-            f"obs_vehicles={n_obs}",
+            f"reward={fr.get('reward', 0.0):+.3f}  "
+            f"r_prog={r_prog}  r_safety={r_safety}",
             fontsize=8)
 
         ax.set_xlim(x0, x1)

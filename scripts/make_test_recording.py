@@ -95,13 +95,30 @@ def make_episode():
         ]
 
         terminated = step == N_STEPS
+        # Per-step reward decomposition, mirroring info["reward_dict"] from
+        # AlphaEnv_MO_SD.step() (raw-seconds safety term, window 2 s, decay 0.5).
+        rd_prog = -0.01 if terminated else 0.01
+        r_s = -math.exp(-abs(d_eta_s) / 0.5) if abs(d_eta_s) < 2.0 else 0.0
+        reward_dict = {
+            "progress_reward": round(rd_prog, 5),
+            "goal_reward": 0.0,  # collision ending, goal never reached
+            "time_penalty": -0.005,
+            "waiting_penalty": -0.005,
+            "gap_penalty": round(r_s, 5),
+            "safety_penalty": round(r_s, 5),
+            "collision_penalty": -15.0 if terminated else 0.0,
+            "r_l": round(rd_prog - 0.005, 5),
+            "r_s": round(r_s, 5),
+            "scalar_reward": round(rd_prog - 0.005, 5) + (-15.0 if terminated else 0.0),
+        }
         frames.append({
             "t": round(t, 3),
             "step": step,
             "ego": ego,
             "vehicles": [nb],
             "action": -0.6 if step >= 30 else 0.35,
-            "reward": 0.01 if not terminated else -15.0,
+            "reward": reward_dict["scalar_reward"],
+            "reward_dict": reward_dict,
             "neighbors": ["flow_1"],
             "obs": obs,
             "neighbors_info": [{
