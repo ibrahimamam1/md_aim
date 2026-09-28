@@ -10,12 +10,16 @@ Checks:
   1. On collision, step() returns exactly fail_penalty (-15.0 by default).
   2. A custom fail_penalty (-25.0) is honored.
   3. On success, step() returns exactly goal_reward (+20.0).
-  4. On dense (non-terminal) steps, the scalar is r_l only (progress +
-     waiting penalty); no collision penalty is added.
+  4. On dense (non-terminal) steps, the scalar is r_l (progress + waiting
+     penalty) plus gap_penalty_weight * r_gap; no collision penalty is added.
+     The dense |d_eta| safety term is included in the scalar for EVERY
+     training mode so single- and dual-critic variants train on the same
+     reward signal (fair comparison).
   5. Reward plumbing: info["reward_dict"], info["vector_reward"], and
      final mo_telemetry all carry the penalty on the collision step.
 """
 
+import math
 import os
 import sys
 import types
@@ -297,7 +301,8 @@ class StubSimulationParams:
         self.num_clients = 1
 
 
-def make_env(fail_penalty=-15.0, goal_reward=20.0, colliding_ids=("rl_0",)):
+def make_env(fail_penalty=-15.0, goal_reward=20.0, colliding_ids=("rl_0",),
+             gap_penalty_weight=0.25):
     """
     Builds a real AlphaEnv_MO_SD with the flow Kernel and base-class
     constructor stubbed out, then manually replicates the base-class
@@ -331,6 +336,7 @@ def make_env(fail_penalty=-15.0, goal_reward=20.0, colliding_ids=("rl_0",)):
             simulator="traci",
             fail_penalty=fail_penalty,
             goal_reward=goal_reward,
+            gap_penalty_weight=gap_penalty_weight,
         )
 
     # Manually replicate Env_N.__init__ post-kernel logic
@@ -404,10 +410,50 @@ class TestEgoCollisionPenalty(unittest.TestCase):
         rd = info["reward_dict"]
         self.assertEqual(rd["collision_penalty"], 0.0)
         self.assertEqual(rd["goal_reward"], 0.0)
-        # scalar == r_l + r_col with r_col == 0
-        self.assertEqual(float(reward), rd["total_long_term_reward"])
+        # scalar == r_l + gap_penalty_weight * r_gap (r_col == 0; the mock
+        # dense step has no neighbors in the observation, so r_gap == 0 here)
+        self.assertEqual(
+            float(reward),
+            rd["total_long_term_reward"] + 0.25 * rd["gap_penalty"])
         # Dense steps stay small: no sparse terminal leaking into them
         self.assertLess(abs(float(reward)), 5.0)
+
+    def test_dense_step_includes_gap_penalty_in_scalar(self):
+        """The dense |d_eta| safety term enters the scalar as
+        gap_penalty_weight * r_gap — the SAME signal for every training mode
+        (baseline / exp_a / ablation single-critic included) — and a custom
+        gap_penalty_weight is honored."""
+        for gap_w in (0.25, 2.0):
+            env = make_env(gap_penalty_weight=gap_w)
+            env.k.kernel_api.simulation._colliding = []
+
+            real_get_state = env.get_state
+
+            def fake_get_state(_env=env, _real=real_get_state):
+                obs = _real()
+                # Inject a neighbor inside the 2 s danger window AFTER the real
+                # get_state, so the REAL reward path computes a nonzero r_gap.
+                _env.last_neighbors_info = [{
+                    "veh_id": "hv_1", "d_eta": 0.25, "ttc": 1.0, "gap": 5.0,
+                    "distance": 10.0, "ego_dist_to_cp": 10.0,
+                    "other_dist_to_cp": 10.0, "other_speed": 8.0,
+                }]
+                return obs
+
+            env.get_state = fake_get_state
+            _, reward, terminated, _, info = env.step(0.0)
+            self.assertFalse(terminated)
+            rd = info["reward_dict"]
+            # r_gap computed by the real reward path: -exp(-|0.25| / 0.5)
+            self.assertAlmostEqual(rd["gap_penalty"], -math.exp(-0.5), places=6)
+            self.assertAlmostEqual(rd["r_s"], -math.exp(-0.5), places=6)
+            # Scalar == r_l + gap_w * r_gap (r_col == 0 on dense steps)
+            self.assertAlmostEqual(
+                float(reward), rd["r_l"] + gap_w * rd["gap_penalty"], places=6)
+            # ...and the term must actually shift the scalar
+            self.assertAlmostEqual(
+                float(reward), rd["r_l"] + gap_w * (-math.exp(-0.5)), places=6)
+            env.close()
 
     def test_reward_dict_vector_and_mo_telemetry_carry_penalty(self):
         """collision_penalty / vector_reward / final mo_telemetry all agree."""
@@ -419,8 +465,13 @@ class TestEgoCollisionPenalty(unittest.TestCase):
         self.assertEqual(rd["collision_penalty"], -15.0)
         self.assertEqual(rd["total_safety_reward"], -15.0)
         self.assertEqual(rd["r_s"], -15.0)
-        # scalar == r_l + r_col
-        self.assertEqual(float(reward), rd["r_l"] + rd["collision_penalty"])
+        # Terminal collision stays pure: the fail branch returns r_gap == 0,
+        # so scalar == r_l + gap_penalty_weight * r_gap + r_col == r_l + r_col
+        # (the collision penalty must not be double-counted).
+        self.assertEqual(rd["gap_penalty"], 0.0)
+        self.assertEqual(
+            float(reward),
+            rd["r_l"] + 0.25 * rd["gap_penalty"] + rd["collision_penalty"])
 
         # vector_reward = [r_l, r_s] -> [0.0, -15.0]
         vr = info["vector_reward"]

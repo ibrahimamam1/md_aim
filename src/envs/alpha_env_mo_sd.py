@@ -9,11 +9,11 @@ Key features:
    - Long-term Efficiency: r_l = Δp_t + waiting_penalty * I[v_ego < v_thresh]
    - Short-term Safety:     r_s = Σ_neighbors -exp(-|d_eta_s|/0.5)
                             (raw seconds; active when |d_eta_s| < 2.0 s)
-   - Sparse terminals:      r = +20.0 goal reached, fail_penalty (-15.0) collision
-   Cleanly passed in info["vector_reward"] = [r_l, r_s] and info["reward_dict"].
-   Scalar reward = r_l + terminal collision penalty; per the research spec the
-   |d_eta| safety term (r_s) is decomposed and logged but deliberately
-   excluded from the returned scalar.
+   - Sparse terminals:      r = +20.0 goal reached, fail_penalty (-15.0) collision    Cleanly passed in info["vector_reward"] = [r_l, r_s] and info["reward_dict"].
+    Scalar reward = r_l + gap_penalty_weight * r_gap + terminal collision
+    penalty — identical across every training mode so single-critic variants
+    (baseline / exp_a / ablation) optimize the same dense objective as the
+    dual-critic exp_b / exp_c.
 2. Conflict & Risk State:
    - Computes minimum Time-to-Collision (TTC), raw arrival time gap |d_eta| (s),
      and physical separation distance.
@@ -126,7 +126,9 @@ class AlphaEnv_MO_SD(Env_N):
         self.waiting_penalty = float(waiting_penalty)
         self.waiting_speed_threshold = float(waiting_speed_threshold)
 
-        # Unused by the new scalar scheme (kept for backward compatibility)
+        # Reward-scheme weight: gap_penalty_weight scales the dense |d_eta|
+        # safety term inside the scalar reward (all training modes);
+        # ttc_penalty_weight is reserved.
         self.gap_penalty_weight = float(gap_penalty_weight)
         self.ttc_penalty_weight = float(ttc_penalty_weight)
         self.collision_penalty = float(collision_penalty)
@@ -643,9 +645,11 @@ class AlphaEnv_MO_SD(Env_N):
           - Safety (r_s only): Σ_neighbors -gain·exp(-|Δη|/window) when |Δη| < window
             (raw seconds; see d_eta_reward_window / d_eta_reward_gain)
 
-        Note: per the research spec, the |d_eta| safety term is decomposed into
-        r_s (for telemetry / info["vector_reward"]) but deliberately EXCLUDED
-        from the returned scalar reward (see compute_reward).
+        Note: the |d_eta| safety term is decomposed into r_s for
+        info["vector_reward"] (dual-critic safety head) and telemetry, and is
+        also included in the returned scalar scaled by gap_penalty_weight so
+        every training mode trains on the same dense objective (see
+        compute_reward).
         """
         r_prog = 0.0
         r_goal = 0.0
@@ -708,8 +712,8 @@ class AlphaEnv_MO_SD(Env_N):
 
         # 3. Safety penalty: exponential spike as raw |Δη| (seconds) -> 0,
         #    applied only when neighbors are projected to arrive within the
-        #    conflict window. Computed for r_s / telemetry; NOT included in
-        #    the scalar reward.
+        #    conflict window. Returned as r_s (vector head / telemetry) and
+        #    added to the scalar scaled by gap_penalty_weight.
         #    Shape match with the old normalized form -exp(-10·|Δη_n|)
         #    (active |Δη_n| < 0.4): since Δη_n = tanh(Δη_s/5),
         #    exp(-10·Δη_n) ≈ exp(-Δη_s/0.5) and the cutoff maps to ~2.1 s.
@@ -743,9 +747,12 @@ class AlphaEnv_MO_SD(Env_N):
 
         Dense scalar reward:
             r = Δp_t + waiting_penalty * I[v_ego < waiting_speed_threshold]
+                + gap_penalty_weight * Σ_neighbors -gain·exp(-|Δη|/window)
         Sparse terminal rewards: +goal_reward (20.0) on success, fail_penalty
-        (-15.0) on collision. The |d_eta| safety term (r_s) is decomposed for
-        the dual-critic heads and telemetry but excluded from the scalar.
+        (-15.0) on collision; terminals stay pure (r_gap is 0 on them). The
+        same dense objective reaches every training mode, so single-critic
+        (baseline / exp_a / ablation) and dual-critic (exp_b / exp_c) variants
+        are trained on identical reward signals.
         """
         neighbors_info = getattr(self, "last_neighbors_info", []) or []
         conflict_info = self.compute_conflict_features(neighbors_info)
@@ -757,11 +764,12 @@ class AlphaEnv_MO_SD(Env_N):
             conflict_info=conflict_info
         )
 
-        # Plain scalar matching the research spec: dense progress + waiting,
-        # sparse terminals. The dense |d_eta| safety term (r_s) is logged via
-        # vector_reward/telemetry but NOT added to the returned reward; only
-        # the terminal collision penalty enters from the safety side.
-        scalar_reward = float(r_l + r_col)
+        # Unified scalar for ALL training modes: dense progress + waiting plus
+        # the dense |d_eta| safety term scaled by gap_penalty_weight. This keeps
+        # baseline / exp_a / ablation (single-critic) on the same reward signal
+        # as the dual-critic exp_b / exp_c. Sparse terminals stay pure: r_gap is
+        # 0 on terminal branches, so the collision penalty is never doubled.
+        scalar_reward = float(r_l + self.gap_penalty_weight * r_gap + r_col)
 
         self._last_step_cache = {
             "r_l": r_l,
@@ -807,7 +815,7 @@ class AlphaEnv_MO_SD(Env_N):
                 neighbors_info=neighbors_info, current_action=action,
                 conflict_info=conflict_info
             )
-            scalar_reward = float(r_l + r_col)
+            scalar_reward = float(r_l + self.gap_penalty_weight * r_gap + r_col)
 
         vector_reward = np.array([r_l, r_s], dtype=np.float32)
         self.last_vector_reward = vector_reward
