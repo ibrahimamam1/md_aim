@@ -47,6 +47,8 @@ from networks.asymetric_random import AsymmetricRandomNetwork
 from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.callbacks import BaseCallback
+from stable_baselines3.common.utils import set_random_seed
+from types import SimpleNamespace
 
 from src.envs.alpha_env_mo_sd import AlphaEnv_MO_SD
 from src.models.attention_model import AttentionFeatureExtractor
@@ -86,8 +88,7 @@ def parse_args():
     parser.add_argument("--num_workers", type=int, default=24, help="Number of parallel env workers.")
     parser.add_argument("--n_steps", type=int, default=512, help="Steps per rollout per worker.")
     parser.add_argument("--batch_size", type=int, default=128, help="Minibatch size.")
-    parser.add_argument("--learning_rate", type=float, default=3e-4, help="Initial learning rate.")
-    parser.add_argument("--min_learning_rate", type=float, default=1e-5, help="Floor learning rate.")
+    parser.add_argument("--learning_rate", type=float, default=3e-4, help="Fixed learning rate (no annealing).")
     parser.add_argument("--seed", type=int, default=42, help="Random seed.")
 
     # Network / Model
@@ -203,12 +204,6 @@ class MOTrafficCallback(BaseCallback):
         return True
 
 
-def linear_schedule(initial_value: float, min_value: float):
-    def func(progress_remaining: float) -> float:
-        return max(min_value, progress_remaining * initial_value)
-    return func
-
-
 def create_env_factory(args, render=False):
     root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     net_file = os.path.join(root_dir, "networks", "100m_skewed_right_before_left.net.xml")
@@ -263,9 +258,10 @@ def create_env_factory(args, render=False):
         color_by_speed=False, use_ballistic=False,
     )
 
-    env_mode = "ablation_reward_adaptation" if args.mode == "ablation" else (
-        "baseline" if args.mode == "baseline" else "multi_objective"
-        "baseline" if args.mode in ("baseline", "exp_a") else "multi_objective"
+    env_mode = (
+        "ablation_reward_adaptation" if args.mode == "ablation"
+        else "baseline" if args.mode in ("baseline", "exp_a")
+        else "multi_objective"
     )
 
     def _make():
@@ -298,60 +294,105 @@ def create_env_factory(args, render=False):
     return _make
 
 
+def _active_wandb_run():
+    """The active wandb run handle, or None (never raises; wandb optional)."""
+    try:
+        import wandb
+        return wandb.run
+    except Exception:
+        return None
+
+
 def main():
+    """CLI entry point; also the W&B sweep-agent entry point.
+
+    When launched via `wandb agent <entity>/<project>/<sweep_id>`, wandb.init()
+    picks up the sweep context and wandb.config arrives pre-populated with the
+    parameters sampled for this arm; those values override the argparse
+    defaults here, so the sweep fully controls the hyperparameters.
+    """
     args = parse_args()
-    root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    config = vars(args)
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_name = f"{args.mode}_g0_{args.gamma_0}_gl_{args.gamma_l}_gs_{args.gamma_s_normal}_wl_{args.weight_l}_{timestamp}"
-
-    checkpoint_root = args.checkpoint_dir or os.path.join(root_dir, "checkpoints", "mo_sd", run_name)
-    tensorboard_dir = os.path.join(root_dir, "tensorboard_logs", "mo_sd", run_name)
-    os.makedirs(checkpoint_root, exist_ok=True)
-    os.makedirs(tensorboard_dir, exist_ok=True)
-
-    # Save experiment configuration metadata
-    config_path = os.path.join(checkpoint_root, "experiment_config.json")
-    with open(config_path, "w") as f:
-        json.dump(vars(args), f, indent=2)
-
-    print("\n" + "=" * 76)
-    print(f" Multi-Objective, State-Dependent RL Training [{args.mode.upper()}]")
-    print(f" Run name        : {run_name}")
-    print(f" Checkpoint root : {checkpoint_root}")
-    print(f" Tensorboard dir : {tensorboard_dir}")
-    print(f" Mode            : {args.mode}")
-    print(f" Discounts       : gamma_0={args.gamma_0}, gamma_l={args.gamma_l}, gamma_s_normal={args.gamma_s_normal}, gamma_s_danger={args.gamma_s_danger}")
-    print(f" Pareto weights  : weight_l={args.weight_l}, weight_s={args.weight_s}")
-    print(f" Timesteps       : {args.timesteps} across {args.num_workers} workers")
-    print("=" * 76 + "\n")
-
-    # W&B Initialization
     wandb_run = None
     if not args.no_wandb:
         try:
             import wandb
             wandb_run = wandb.init(
                 project=args.wandb_project,
-                name=run_name,
                 notes=args.note,
-                config=vars(args),
+                config=config,
                 sync_tensorboard=True,
                 save_code=True,
             )
             print("[wandb] initialized successfully.")
         except Exception as e:
+            wandb_run = None
             print(f"[wandb] init skipped or failed ({e}); continuing with TensorBoard.")
 
+        if wandb_run is not None:
+            # Sweep agent: wandb.config holds the parameters sampled for this
+            # arm. Only known keys are merged; they override argparse defaults.
+            sweep_overrides = {
+                k: v for k, v in dict(wandb_run.config).items() if k in config
+            }
+            if sweep_overrides:
+                config.update(sweep_overrides)
+                print(f"[wandb] sweep overrides applied: {sweep_overrides}")
+
+    train_run(SimpleNamespace(**config))
+
+
+def train_run(cfg):
+    """One training run over a resolved config namespace (CLI or sweep arm)."""
+    root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    wandb_run = _active_wandb_run()
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_name = (f"{cfg.mode}_g0_{cfg.gamma_0}_gl_{cfg.gamma_l}_gs_{cfg.gamma_s_normal}"
+                f"_wl_{cfg.weight_l}_lr{cfg.learning_rate}_s{cfg.seed}_{timestamp}")
+
+    checkpoint_root = cfg.checkpoint_dir or os.path.join(root_dir, "checkpoints", "mo_sd", run_name)
+    tensorboard_dir = os.path.join(root_dir, "tensorboard_logs", "mo_sd", run_name)
+    os.makedirs(checkpoint_root, exist_ok=True)
+    os.makedirs(tensorboard_dir, exist_ok=True)
+
+    # Save experiment configuration metadata (post sweep-merge)
+    config_path = os.path.join(checkpoint_root, "experiment_config.json")
+    with open(config_path, "w") as f:
+        json.dump(vars(cfg), f, indent=2)
+
+    print("\n" + "=" * 76)
+    print(f" Multi-Objective, State-Dependent RL Training [{cfg.mode.upper()}]")
+    print(f" Run name        : {run_name}")
+    print(f" Checkpoint root : {checkpoint_root}")
+    print(f" Tensorboard dir : {tensorboard_dir}")
+    print(f" Mode            : {cfg.mode}")
+    print(f" Discounts       : gamma_0={cfg.gamma_0}, gamma_l={cfg.gamma_l}, gamma_s_normal={cfg.gamma_s_normal}, gamma_s_danger={cfg.gamma_s_danger}")
+    print(f" Pareto weights  : weight_l={cfg.weight_l}, weight_s={cfg.weight_s}")
+    print(f" Timesteps       : {cfg.timesteps} across {cfg.num_workers} workers")
+    print(f" Learning rate   : {cfg.learning_rate} (fixed, no annealing)")
+    print(f" Seed            : {cfg.seed}")
+    print("=" * 76 + "\n")
+
+    if wandb_run is not None:
+        try:
+            wandb_run.name = run_name  # readable dashboard name per arm
+        except Exception:
+            pass
+
+    # Seed python / numpy / torch so sweep arms are reproducible
+    set_random_seed(cfg.seed)
+
     # Vectorized environments
-    env_fn = create_env_factory(args)
-    if args.num_workers > 1:
-        vec_env = SubprocVecEnv([env_fn for _ in range(args.num_workers)])
+    env_fn = create_env_factory(cfg)
+    if cfg.num_workers > 1:
+        vec_env = SubprocVecEnv([env_fn for _ in range(cfg.num_workers)])
     else:
         vec_env = DummyVecEnv([env_fn])
 
     # Policy kwargs
-    if args.version == "attention_continuous":
+    if cfg.version == "attention_continuous":
         policy_kwargs = dict(
             features_extractor_class=AttentionFeatureExtractor,
             features_extractor_kwargs=dict(
@@ -371,17 +412,18 @@ def main():
     model = MOSDPPO(
         policy=MultiObjectiveActorCriticPolicy,
         env=vec_env,
-        mode=args.mode,
-        gamma_0=args.gamma_0,
-        gamma_l=args.gamma_l,
-        gamma_s_normal=args.gamma_s_normal,
-        gamma_s_danger=args.gamma_s_danger,
-        weight_l=args.weight_l,
-        weight_s=args.weight_s,
+        mode=cfg.mode,
+        gamma_0=cfg.gamma_0,
+        gamma_l=cfg.gamma_l,
+        gamma_s_normal=cfg.gamma_s_normal,
+        gamma_s_danger=cfg.gamma_s_danger,
+        weight_l=cfg.weight_l,
+        weight_s=cfg.weight_s,
         policy_kwargs=policy_kwargs,
-        learning_rate=linear_schedule(args.learning_rate, args.min_learning_rate),
-        n_steps=args.n_steps,
-        batch_size=args.batch_size,
+        learning_rate=cfg.learning_rate,
+        n_steps=cfg.n_steps,
+        batch_size=cfg.batch_size,
+        seed=cfg.seed,
         n_epochs=4,
         gae_lambda=0.95,
         clip_range=0.25,
@@ -401,7 +443,7 @@ def main():
 
     # Execute training
     try:
-        model.learn(total_timesteps=args.timesteps, callback=callbacks, progress_bar=True)
+        model.learn(total_timesteps=cfg.timesteps, callback=callbacks, progress_bar=True)
     finally:
         final_model_path = os.path.join(checkpoint_root, "final_model")
         model.save(final_model_path)

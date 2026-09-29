@@ -1,0 +1,40 @@
+# ==============================================================================
+# sweep_lr.yaml — W&B sweep: fixed learning-rate search (no annealing)
+#
+# Launch (one-time, creates the sweep and prints the agent command):
+#   wandb sweep scripts/sweep_lr.yaml
+# Then run N parallel agents (each takes the next unclaimed arm):
+#   wandb agent <entity>/<project>/<sweep_id>
+# Or just run scripts/wandb_lr_sweep.sh, which does both.
+#
+# Metric: rollout/ep_rew_mean is logged by SB3 at every rollout end, so the
+# sweep tracks training progress live (no need to wait for final evaluation).
+# ==============================================================================
+program: src/configs/train_mo_sd.py
+method: grid
+metric:
+  name: rollout/ep_rew_mean
+  goal: maximize
+parameters:
+  learning_rate:
+    values: [1.0e-4, 3.0e-4, 1.0e-3, 3.0e-3, 1.0e-2]
+  # Fixed per-arm configuration (identical across arms; vary only LR):
+  mode:
+    value: exp_b
+  timesteps:
+    value: 200000
+  seed:
+    value: 42
+  weight_l:
+    value: 0.5
+  weight_s:
+    value: 0.5
+  gap_penalty_weight:
+    value: 0.25
+  no_wandb:
+    value: false
+command:
+  - ${env}
+  - ${interpreter}
+  - ${program}
+  - ${args}
