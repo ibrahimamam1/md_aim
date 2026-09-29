@@ -31,8 +31,9 @@ parameters:
     value: 0.5
   gap_penalty_weight:
     value: 0.25
-  no_wandb:
-    value: false
+# NOTE: do NOT add store_true CLI flags (like no_wandb) as parameters — the
+# agent serializes every parameter as --key=value, which argparse rejects for
+# boolean flags ("ignored explicit argument 'False'").
 command:
   - ${env}
   - ${interpreter}

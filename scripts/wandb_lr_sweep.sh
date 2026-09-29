@@ -74,7 +74,11 @@ fi
 echo "[preflight] wandb import + credentials OK"
 
 # --- Create the sweep ---------------------------------------------------------
-SWEEP_OUTPUT=$("$PYTHON_CMD" -m wandb sweep scripts/sweep_lr.yaml 2>&1) || {
+SWEEP_ARGS=(sweep --project "${WANDB_PROJECT:-md_aim}")
+if [ -n "${WANDB_ENTITY:-}" ]; then
+    SWEEP_ARGS+=(--entity "${WANDB_ENTITY}")
+fi
+SWEEP_OUTPUT=$("$PYTHON_CMD" -m wandb "${SWEEP_ARGS[@]}" scripts/sweep_lr.yaml 2>&1) || {
     echo "${SWEEP_OUTPUT}"
     echo ""
     echo "ERROR: failed to create the sweep (see output above)."

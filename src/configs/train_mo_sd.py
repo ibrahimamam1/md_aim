@@ -318,13 +318,18 @@ def main():
     if not args.no_wandb:
         try:
             import wandb
-            wandb_run = wandb.init(
-                project=args.wandb_project,
+            # Under a sweep agent (WANDB_SWEEP_ID set) the entity/project come
+            # from the sweep context; passing an explicit project can mismatch
+            # the sweep's project and break run registration.
+            init_kwargs = dict(
                 notes=args.note,
                 config=config,
                 sync_tensorboard=True,
                 save_code=True,
             )
+            if os.environ.get("WANDB_SWEEP_ID") is None:
+                init_kwargs["project"] = args.wandb_project
+            wandb_run = wandb.init(**init_kwargs)
             print("[wandb] initialized successfully.")
         except Exception as e:
             wandb_run = None
