@@ -20,7 +20,7 @@ parameters:
     values: [1.0e-4, 3.0e-4, 1.0e-3, 3.0e-3, 1.0e-2]
   # Fixed per-arm configuration (identical across arms; vary only LR):
   mode:
-    value: exp_b
+    value: baseline
   timesteps:
     value: 200000
   seed:
