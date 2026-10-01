@@ -6,8 +6,9 @@ Multi-Objective, State-Dependent PPO (MOSDPPO) and MultiObjectiveRolloutBuffer.
 Supports:
   - Baseline: Fixed single discount γ_0.
   - Experiment A: State-dependent single discount γ(s).
-  - Experiment B: Multi-objective state-dependent discount [γ_l, γ_s(s)] (Core).
-  - Experiment C: Learnable discount factors γ_φ(s) with anti-cheating regularized loss.
+  - Experiment B: Learnable single discount γ_φ(s) (single critic).
+  - Experiment C: Multi-objective state-dependent discount [γ_l, γ_s(s)] (formerly Exp B).
+  - Experiment D: Learnable discount factors [γ_l(s), γ_s(s)] with regularized loss (formerly Exp C).
   - Ablation: State-dependent reward weighting λ(s) with fixed discount.
 """
 
@@ -26,7 +27,7 @@ from stable_baselines3.common.vec_env import VecEnv
 from stable_baselines3.common.utils import obs_as_tensor, explained_variance
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from mo_sd_models import MultiObjectiveActorCriticPolicy, LearnableDiscountNet
+from mo_sd_models import MultiObjectiveActorCriticPolicy, LearnableDiscountNet, LearnableSingleDiscountNet
 
 
 class MultiObjectiveRolloutBuffer(RolloutBuffer):
@@ -249,9 +250,9 @@ class MOSDPPO(PPO):
         self.learnable_discount_net = learnable_discount_net
         self.lambda_reg_discount = lambda_reg_discount
 
-        # Infer critic_dim
+        # Infer critic_dim: Exp C and Exp D use dual critics; Baseline, Exp A, Exp B, Ablation use single critic
         if critic_dim is None:
-            self.critic_dim = 2 if self.mode in ("exp_b", "exp_c") else 1
+            self.critic_dim = 2 if self.mode in ("exp_c", "exp_d") else 1
         else:
             self.critic_dim = critic_dim
 
@@ -287,7 +288,16 @@ class MOSDPPO(PPO):
             weight_s=self.weight_s,
         )
 
-        if self.mode == "exp_c" and self.learnable_discount_net is None:
+        if self.mode == "exp_b" and self.learnable_discount_net is None:
+            obs_dim = int(np.prod(self.observation_space.shape))
+            self.learnable_discount_net = LearnableSingleDiscountNet(
+                input_dim=obs_dim,
+                gamma_min=self.gamma_s_danger,
+                gamma_max=self.gamma_0,
+                gamma_0=self.gamma_0,
+            ).to(self.device)
+
+        elif self.mode == "exp_d" and self.learnable_discount_net is None:
             obs_dim = int(np.prod(self.observation_space.shape))
             self.learnable_discount_net = LearnableDiscountNet(
                 input_dim=obs_dim,
@@ -324,19 +334,29 @@ class MOSDPPO(PPO):
                 gammas[i, 0] = self.gamma_s_danger if is_conflict else self.gamma_0
 
             elif self.mode == "exp_b":
-                # Multi-objective state-dependent discounts: [gamma_l, gamma_s(s)]
+                # Learnable single discount: handled via batch neural network forward pass below
+                pass
+
+            elif self.mode == "exp_c":
+                # Multi-objective state-dependent discounts: [gamma_l, gamma_s(s)] (formerly exp_b)
                 gammas[i, 0] = self.gamma_l
                 gammas[i, 1] = self.gamma_s_danger if is_conflict else self.gamma_s_normal
 
-            elif self.mode == "exp_c":
-                # Handled via batch neural network forward pass below
+            elif self.mode == "exp_d":
+                # Learnable multi-objective discounts: [gamma_l(s), gamma_s(s)] (formerly exp_c)
                 pass
 
             elif self.mode == "ablation":
                 # State-dependent reward weighting: fixed discount
                 gammas[i, 0] = self.gamma_0
 
-        if self.mode == "exp_c" and self.learnable_discount_net is not None:
+        if self.mode == "exp_b" and self.learnable_discount_net is not None:
+            with th.no_grad():
+                obs_t = th.as_tensor(obs, device=self.device, dtype=th.float32)
+                g_t, _ = self.learnable_discount_net(obs_t)
+                gammas[:, 0] = g_t.cpu().numpy().flatten()
+
+        elif self.mode == "exp_d" and self.learnable_discount_net is not None:
             with th.no_grad():
                 obs_t = th.as_tensor(obs, device=self.device, dtype=th.float32)
                 g_l_t, g_s_t, _ = self.learnable_discount_net(obs_t)
@@ -538,8 +558,8 @@ class MOSDPPO(PPO):
             if not continue_training:
                 break
 
-        # Exp C: Train LearnableDiscountNet
-        if self.mode == "exp_c" and self.learnable_discount_net is not None:
+        # Exp B & Exp D: Train LearnableDiscountNet / LearnableSingleDiscountNet
+        if self.mode in ("exp_b", "exp_d") and self.learnable_discount_net is not None:
             all_obs = th.as_tensor(self.rollout_buffer.observations.reshape(-1, *self.rollout_buffer.obs_shape), device=self.device, dtype=th.float32)
             all_risks = th.as_tensor(self.rollout_buffer.risks.flatten(), device=self.device, dtype=th.float32)
 

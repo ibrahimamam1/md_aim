@@ -5,23 +5,27 @@ Unified training script for Multi-Objective, State-Dependent Discounting for Aut
 
 Supported Experimental Modes:
   - baseline: Fixed single discount γ_0 ∈ {0.90, 0.95, 0.97, 0.99, 0.995}.
-  - exp_a:    State-dependent single discount γ(s).
-  - exp_b:    Multi-objective state-dependent discount [γ_l, γ_s(s)] (Core formulation).
-  - exp_c:    Learnable discount factors γ_φ(s) with anti-cheating regularized loss.
+  - exp_a:    State-dependent single discount γ(s) (rule-based).
+  - exp_b:    Learnable state-dependent single discount γ_φ(s) (single critic).
+  - exp_c:    Multi-objective state-dependent discount [γ_l, γ_s(s)] (formerly exp_b).
+  - exp_d:    Learnable multi-objective discount factors [γ_l(s), γ_s(s)] with regularized loss (formerly exp_c).
   - ablation: State-dependent reward weighting λ(s) with fixed discount.
 
 Usage Examples:
   # Baseline with γ_0=0.97:
   python src/configs/train_mo_sd.py --mode baseline --gamma_0 0.97
 
-  # Experiment A (State-dependent single discount):
+  # Experiment A (State-dependent single discount, rule-based):
   python src/configs/train_mo_sd.py --mode exp_a --gamma_0 0.99 --gamma_s_danger 0.0
 
-  # Experiment B (Core multi-objective state-dependent discount):
-  python src/configs/train_mo_sd.py --mode exp_b --gamma_l 0.99 --gamma_s_normal 0.95 --gamma_s_danger 0.0 --weight_l 0.5 --weight_s 0.5
+  # Experiment B (Learnable state-dependent single discount):
+  python src/configs/train_mo_sd.py --mode exp_b --gamma_0 0.99 --gamma_s_danger 0.0
 
-  # Experiment C (Learnable discount network):
-  python src/configs/train_mo_sd.py --mode exp_c --gamma_l 0.99 --gamma_s_normal 0.95
+  # Experiment C (Multi-objective state-dependent discount, rule-based):
+  python src/configs/train_mo_sd.py --mode exp_c --gamma_l 0.99 --gamma_s_normal 0.95 --gamma_s_danger 0.0 --weight_l 0.5 --weight_s 0.5
+
+  # Experiment D (Learnable multi-objective discount network):
+  python src/configs/train_mo_sd.py --mode exp_d --gamma_l 0.99 --gamma_s_normal 0.95
 
   # Ablation (State-dependent reward weighting):
   python src/configs/train_mo_sd.py --mode ablation --gamma_0 0.99 --lambda_danger 5.0
@@ -58,8 +62,8 @@ from src.models.mo_sd_ppo import MOSDPPO
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Multi-Objective State-Dependent RL Training")
-    parser.add_argument("--mode", type=str, default="exp_b",
-                        choices=["baseline", "exp_a", "exp_b", "exp_c", "ablation"],
+    parser.add_argument("--mode", type=str, default="exp_c",
+                        choices=["baseline", "exp_a", "exp_b", "exp_c", "exp_d", "ablation"],
                         help="Experimental condition.")
     # Discount parameters
     parser.add_argument("--gamma_0", type=float, default=0.99, help="Fixed baseline discount factor.")
@@ -260,7 +264,7 @@ def create_env_factory(args, render=False):
 
     env_mode = (
         "ablation_reward_adaptation" if args.mode == "ablation"
-        else "baseline" if args.mode in ("baseline", "exp_a")
+        else "baseline" if args.mode in ("baseline", "exp_a", "exp_b")
         else "multi_objective"
     )
 

@@ -4,11 +4,18 @@ mo_sd_models.py
 Neural network architectures for Multi-Objective, State-Dependent Discounting.
 
 1. MultiObjectiveActorCriticPolicy:
-   - Configurable for dual value heads [V_l(s), V_s(s)] (Exp B, Exp C)
-     or single value head V(s) (Baseline, Exp A, Ablation).
+   - Configurable for dual value heads [V_l(s), V_s(s)] (Exp C, Exp D)
+     or single value head V(s) (Baseline, Exp A, Exp B, Ablation).
    - Compatible with AttentionFeatureExtractor and MLP trunks.
 
-2. LearnableDiscountNet (Experiment C):
+2. LearnableSingleDiscountNet (Experiment B):
+   - Learnable single discount architecture γ_φ(s).
+   - Enforces bounding: γ_min <= γ(s) <= γ_max.
+   - Provides structural risk prior: γ(s) = γ_max - (γ_max - γ_min) * ρ_φ(s)
+     where ρ_φ(s) ∈ [0, 1] represents learned conflict risk.
+   - Anti-cheating regularized loss: L_reg = λ_γ * ||γ(s) - γ_0||^2.
+
+3. LearnableDiscountNet (Experiment D, formerly Experiment C):
    - Implements Section 10 & 11 learnable discount architecture f_φ(s) = [γ_l(s), γ_s(s)].
    - Enforces bounding: γ_min <= γ_i(s) <= γ_max.
    - Provides structural risk prior: γ_s(s) = γ_max - (γ_max - γ_min) * ρ_φ(s)
@@ -228,4 +235,107 @@ class LearnableDiscountNet(nn.Module):
             "discount_net/mean_risk": float(risk_pred.mean().item()),
         }
         return total_loss, metrics
+
+
+class LearnableSingleDiscountNet(nn.Module):
+    """
+    Learnable single discount network γ_φ(s) for Experiment B.
+
+    Features:
+      1. Bounded range: γ_min <= γ(s) <= γ_max via sigmoid scaling.
+      2. Structural risk prior option:
+         - Output predicted risk ρ_φ(s) ∈ [0, 1].
+         - γ(s) = γ_max - (γ_max - γ_min) * ρ_φ(s).
+         - High risk dynamically contracts the single discount horizon toward γ_min.
+      3. Anti-cheating L2 regularization to anchor discount against baseline γ_0.
+      4. Auxiliary conflict risk prediction loss (BCE) using target conflict risk.
+    """
+
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_dim: int = 128,
+        gamma_min: float = 0.0,
+        gamma_max: float = 0.99,
+        gamma_0: float = 0.99,
+        use_structural_prior: bool = True,
+        learning_rate: float = 1e-4,
+    ):
+        super().__init__()
+        self.gamma_min = gamma_min
+        self.gamma_max = gamma_max
+        self.gamma_0 = gamma_0
+        self.use_structural_prior = use_structural_prior
+
+        # Shared feature trunk
+        self.trunk = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+        )
+
+        if use_structural_prior:
+            # Risk head outputs raw logit for conflict risk ρ ∈ [0, 1]
+            self.risk_head = nn.Linear(hidden_dim, 1)
+        else:
+            # Direct 1-output head for γ
+            self.discount_head = nn.Linear(hidden_dim, 1)
+
+        self.optimizer = th.optim.Adam(self.parameters(), lr=learning_rate)
+
+    def forward(self, obs: th.Tensor) -> Tuple[th.Tensor, th.Tensor]:
+        """
+        Forward pass.
+        Returns:
+            gamma: [batch_size, 1] bounded discount factor
+            risk_pred: [batch_size, 1] predicted conflict risk
+        """
+        feat = self.trunk(obs)
+
+        if self.use_structural_prior:
+            raw_risk = self.risk_head(feat)
+            risk_pred = th.sigmoid(raw_risk)
+            # Structural prior: higher risk -> lower gamma
+            gamma = self.gamma_max - (self.gamma_max - self.gamma_min) * risk_pred
+        else:
+            raw_discount = self.discount_head(feat)
+            gamma = self.gamma_min + (self.gamma_max - self.gamma_min) * th.sigmoid(raw_discount)
+            risk_pred = 1.0 - (gamma - self.gamma_min) / max(self.gamma_max - self.gamma_min, 1e-6)
+
+        return gamma, risk_pred
+
+    def compute_loss(
+        self,
+        obs: th.Tensor,
+        target_risk: Optional[th.Tensor] = None,
+        lambda_reg: float = 0.01,
+        lambda_risk: float = 1.0,
+    ) -> Tuple[th.Tensor, Dict[str, float]]:
+        """
+        Computes regularization loss and optional auxiliary risk prediction loss.
+        """
+        gamma, risk_pred = self.forward(obs)
+
+        # L2 Regularization towards anchor prior gamma_0
+        reg_loss = lambda_reg * th.mean((gamma - self.gamma_0) ** 2)
+
+        # Auxiliary risk supervision loss if environment provided conflict signal
+        risk_loss = th.tensor(0.0, device=obs.device)
+        if target_risk is not None and self.use_structural_prior:
+            target_risk_t = target_risk.view_as(risk_pred).float()
+            risk_loss = lambda_risk * F.binary_cross_entropy(risk_pred, target_risk_t)
+
+        total_loss = reg_loss + risk_loss
+
+        metrics = {
+            "discount_net/loss": float(total_loss.item()),
+            "discount_net/reg_loss": float(reg_loss.item()),
+            "discount_net/risk_loss": float(risk_loss.item()) if target_risk is not None else 0.0,
+            "discount_net/mean_gamma": float(gamma.mean().item()),
+            "discount_net/mean_risk": float(risk_pred.mean().item()),
+        }
+        return total_loss, metrics
+
 
