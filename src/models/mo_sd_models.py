@@ -118,9 +118,93 @@ class MultiObjectiveActorCriticPolicy(ActorCriticPolicy):
         return values, log_prob, entropy
 
 
+
+class CrossAttentionTrunk(nn.Module):
+    """
+    Independent cross-attention trunk for learnable discount networks.
+    Extracts attention over neighbor vehicles using the ego vehicle state as the query.
+    Completely isolated from the policy/critic trunk to prevent representation collapse.
+    """
+
+    def __init__(
+        self,
+        ego_features: int = 4,
+        neighbor_features: int = 5,
+        max_neighbors: int = 5,
+        embed_dim: int = 64,
+        num_heads: int = 2,
+        output_dim: int = 128,
+    ):
+        super().__init__()
+        self.ego_features = ego_features
+        self.neighbor_features = neighbor_features
+        self.max_neighbors = max_neighbors
+        self.embed_dim = embed_dim
+
+        self.ego_encoder = nn.Sequential(
+            nn.Linear(ego_features, embed_dim),
+            nn.LayerNorm(embed_dim),
+            nn.ReLU(),
+        )
+        self.neighbor_encoder = nn.Sequential(
+            nn.Linear(neighbor_features, embed_dim),
+            nn.LayerNorm(embed_dim),
+            nn.ReLU(),
+        )
+        self.attention = nn.MultiheadAttention(
+            embed_dim=embed_dim,
+            num_heads=num_heads,
+            batch_first=True,
+        )
+        context_dim = embed_dim * 2
+        self.context_norm = nn.LayerNorm(context_dim)
+        self.projection = nn.Sequential(
+            nn.Linear(context_dim, output_dim),
+            nn.ReLU(),
+        )
+
+    def forward(self, observations: th.Tensor) -> th.Tensor:
+        obs = observations.float()
+        ego_end = self.ego_features
+        neighbor_end = ego_end + (self.max_neighbors * self.neighbor_features)
+
+        ego_raw = obs[:, :ego_end]
+        neighbor_raw = obs[:, ego_end:neighbor_end].reshape(-1, self.max_neighbors, self.neighbor_features)
+        mask_raw = obs[:, neighbor_end:]
+
+        ego_embed = self.ego_encoder(ego_raw)
+        neighbor_embeds = self.neighbor_encoder(neighbor_raw)
+
+        key_padding_mask = (mask_raw < 0.5)
+        all_masked = key_padding_mask.all(dim=1)
+
+        query = ego_embed.unsqueeze(1)
+        safe_mask = key_padding_mask.clone()
+        safe_mask[all_masked] = False
+
+        attn_output, _ = self.attention(
+            query=query,
+            key=neighbor_embeds,
+            value=neighbor_embeds,
+            key_padding_mask=safe_mask,
+        )
+        attn_output = attn_output.squeeze(1)
+        attn_output = th.where(
+            all_masked.unsqueeze(-1),
+            th.zeros_like(attn_output),
+            attn_output,
+        )
+
+        context = th.cat([ego_embed, attn_output], dim=-1)
+        context = self.context_norm(context)
+        return self.projection(context)
+
+
 class LearnableDiscountNet(nn.Module):
     """
-    Learnable discount network γ_φ(s) = [γ_l(s), γ_s(s)] for Experiment C.
+    Learnable discount network γ_φ(s) = [γ_l(s), γ_s(s)] for Experiment D (formerly Exp C).
+
+    Equipped with an independent CrossAttentionTrunk over ego and neighbor vehicles.
 
     Features:
       1. Bounded range: γ_min <= γ_i(s) <= γ_max via sigmoid scaling.
@@ -140,6 +224,12 @@ class LearnableDiscountNet(nn.Module):
         gamma_0_l: float = 0.99,
         gamma_0_s: float = 0.95,
         use_structural_prior: bool = True,
+        use_attention: bool = True,
+        ego_features: int = 4,
+        neighbor_features: int = 5,
+        max_neighbors: int = 5,
+        embed_dim: int = 64,
+        num_heads: int = 2,
         learning_rate: float = 1e-4,
     ):
         super().__init__()
@@ -148,15 +238,26 @@ class LearnableDiscountNet(nn.Module):
         self.gamma_0_l = gamma_0_l
         self.gamma_0_s = gamma_0_s
         self.use_structural_prior = use_structural_prior
+        self.use_attention = use_attention
 
-        # Shared feature trunk
-        self.trunk = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
-            nn.LayerNorm(hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-        )
+        expected_obs_dim = ego_features + max_neighbors * neighbor_features + max_neighbors
+        if use_attention and input_dim == expected_obs_dim:
+            self.trunk = CrossAttentionTrunk(
+                ego_features=ego_features,
+                neighbor_features=neighbor_features,
+                max_neighbors=max_neighbors,
+                embed_dim=embed_dim,
+                num_heads=num_heads,
+                output_dim=hidden_dim,
+            )
+        else:
+            self.trunk = nn.Sequential(
+                nn.Linear(input_dim, hidden_dim),
+                nn.LayerNorm(hidden_dim),
+                nn.ReLU(),
+                nn.Linear(hidden_dim, hidden_dim),
+                nn.ReLU(),
+            )
 
         if use_structural_prior:
             # Efficiency head (outputs raw logit for γ_l)
@@ -209,7 +310,7 @@ class LearnableDiscountNet(nn.Module):
         lambda_risk: float = 1.0,
     ) -> Tuple[th.Tensor, Dict[str, float]]:
         """
-        Computes regularization loss and optional auxiliary risk prediction loss.
+        Computes regularization loss and auxiliary risk prediction loss.
         """
         gamma_l, gamma_s, risk_pred = self.forward(obs)
 
@@ -222,7 +323,8 @@ class LearnableDiscountNet(nn.Module):
         risk_loss = th.tensor(0.0, device=obs.device)
         if target_risk is not None and self.use_structural_prior:
             target_risk_t = target_risk.view_as(risk_pred).float()
-            risk_loss = lambda_risk * F.binary_cross_entropy(risk_pred, target_risk_t)
+            # Smooth L1 (Huber) regression for continuous risk targets in [0, 1]
+            risk_loss = lambda_risk * F.smooth_l1_loss(risk_pred, target_risk_t)
 
         total_loss = reg_loss + risk_loss
 
@@ -241,24 +343,34 @@ class LearnableSingleDiscountNet(nn.Module):
     """
     Learnable single discount network γ_φ(s) for Experiment B.
 
+    Equipped with an independent CrossAttentionTrunk over ego and neighbor vehicles,
+    completely decoupled from the policy network to prevent representation collapse.
+
     Features:
-      1. Bounded range: γ_min <= γ(s) <= γ_max via sigmoid scaling.
-      2. Structural risk prior option:
+      1. Independent cross-attention feature extraction over neighbor vehicle states.
+      2. Bounded range: γ_min <= γ(s) <= γ_max via structural prior or sigmoid scaling.
+      3. Structural risk prior option:
          - Output predicted risk ρ_φ(s) ∈ [0, 1].
          - γ(s) = γ_max - (γ_max - γ_min) * ρ_φ(s).
          - High risk dynamically contracts the single discount horizon toward γ_min.
-      3. Anti-cheating L2 regularization to anchor discount against baseline γ_0.
-      4. Auxiliary conflict risk prediction loss (BCE) using target conflict risk.
+      4. Anti-cheating L2 regularization to anchor discount against baseline γ_0.
+      5. Auxiliary conflict risk prediction loss (Smooth L1 / Huber) using continuous target risk.
     """
 
     def __init__(
         self,
-        input_dim: int,
+        input_dim: int = 34,
         hidden_dim: int = 128,
         gamma_min: float = 0.0,
         gamma_max: float = 0.99,
         gamma_0: float = 0.99,
         use_structural_prior: bool = True,
+        use_attention: bool = True,
+        ego_features: int = 4,
+        neighbor_features: int = 5,
+        max_neighbors: int = 5,
+        embed_dim: int = 64,
+        num_heads: int = 2,
         learning_rate: float = 1e-4,
     ):
         super().__init__()
@@ -266,15 +378,26 @@ class LearnableSingleDiscountNet(nn.Module):
         self.gamma_max = gamma_max
         self.gamma_0 = gamma_0
         self.use_structural_prior = use_structural_prior
+        self.use_attention = use_attention
 
-        # Shared feature trunk
-        self.trunk = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
-            nn.LayerNorm(hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-        )
+        expected_obs_dim = ego_features + max_neighbors * neighbor_features + max_neighbors
+        if use_attention and input_dim == expected_obs_dim:
+            self.trunk = CrossAttentionTrunk(
+                ego_features=ego_features,
+                neighbor_features=neighbor_features,
+                max_neighbors=max_neighbors,
+                embed_dim=embed_dim,
+                num_heads=num_heads,
+                output_dim=hidden_dim,
+            )
+        else:
+            self.trunk = nn.Sequential(
+                nn.Linear(input_dim, hidden_dim),
+                nn.LayerNorm(hidden_dim),
+                nn.ReLU(),
+                nn.Linear(hidden_dim, hidden_dim),
+                nn.ReLU(),
+            )
 
         if use_structural_prior:
             # Risk head outputs raw logit for conflict risk ρ ∈ [0, 1]
@@ -314,18 +437,18 @@ class LearnableSingleDiscountNet(nn.Module):
         lambda_risk: float = 1.0,
     ) -> Tuple[th.Tensor, Dict[str, float]]:
         """
-        Computes regularization loss and optional auxiliary risk prediction loss.
+        Computes regularization loss and auxiliary risk prediction loss.
         """
         gamma, risk_pred = self.forward(obs)
 
         # L2 Regularization towards anchor prior gamma_0
         reg_loss = lambda_reg * th.mean((gamma - self.gamma_0) ** 2)
 
-        # Auxiliary risk supervision loss if environment provided conflict signal
+        # Auxiliary risk supervision loss with Smooth L1 (Huber) regression
         risk_loss = th.tensor(0.0, device=obs.device)
         if target_risk is not None and self.use_structural_prior:
             target_risk_t = target_risk.view_as(risk_pred).float()
-            risk_loss = lambda_risk * F.binary_cross_entropy(risk_pred, target_risk_t)
+            risk_loss = lambda_risk * F.smooth_l1_loss(risk_pred, target_risk_t)
 
         total_loss = reg_loss + risk_loss
 
