@@ -57,9 +57,16 @@ def parse_args():
     return parser.parse_args()
 
 
+try:
+    import resource
+    _soft, _hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    resource.setrlimit(resource.RLIMIT_NOFILE, (min(_hard, 65536), _hard))
+except Exception:
+    pass
+
 def kill_stray_sumo():
     try:
-        subprocess.run(["pkill", "-f", "sumo"], capture_output=True)
+        subprocess.run(["pkill", "-f", "sumo"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception:
         pass
 
@@ -274,6 +281,16 @@ def run_calibration():
             finally:
                 if env is not None:
                     try:
+                        for sub_env in getattr(env, "envs", []):
+                            unwrapped = getattr(sub_env, "unwrapped", sub_env)
+                            if hasattr(unwrapped, "terminate"):
+                                unwrapped.terminate()
+                            elif hasattr(sub_env, "terminate"):
+                                sub_env.terminate()
+                            if hasattr(unwrapped, "close"):
+                                unwrapped.close()
+                            elif hasattr(sub_env, "close"):
+                                sub_env.close()
                         env.close()
                     except Exception:
                         pass

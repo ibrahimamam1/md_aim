@@ -31,6 +31,13 @@ from src.models.mo_sd_ppo import MOSDPPO
 from src.eval.episode_recorder import EpisodeRecorder, update_manifest
 from stable_baselines3.common.vec_env import DummyVecEnv
 
+try:
+    import resource
+    _soft, _hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    resource.setrlimit(resource.RLIMIT_NOFILE, (min(_hard, 65536), _hard))
+except Exception:
+    pass
+
 CSV_HEADER = [
     "run", "scenario", "weight_l", "weight_s", "collision", "success",
     "avg_speed", "min_safe_gap", "min_ttc", "emergency_braking_count", "near_collision_count",
@@ -62,9 +69,16 @@ def parse_args():
     return parser.parse_args()
 
 
+def open_fd_count():
+    try:
+        return len(os.listdir("/proc/self/fd"))
+    except Exception:
+        return -1
+
+
 def kill_stray_sumo():
     try:
-        subprocess.run(["pkill", "-f", "sumo"], capture_output=True)
+        subprocess.run(["pkill", "-f", "sumo"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception:
         pass
 
@@ -212,13 +226,28 @@ def evaluate():
                             print(f"  Run {run_idx:02d} | WARNING: recording failed: {rec_err}")
                     if env is not None:
                         try:
+                            for sub_env in getattr(env, "envs", []):
+                                unwrapped = getattr(sub_env, "unwrapped", sub_env)
+                                if hasattr(unwrapped, "terminate"):
+                                    unwrapped.terminate()
+                                elif hasattr(sub_env, "terminate"):
+                                    sub_env.terminate()
+                                if hasattr(unwrapped, "close"):
+                                    unwrapped.close()
+                                elif hasattr(sub_env, "close"):
+                                    sub_env.close()
                             env.close()
                         except Exception:
                             pass
                     kill_stray_sumo()
                     del env
                     gc.collect()
-                    time.sleep(0.1)
+                    time.sleep(0.05)
+
+                    if (run_idx + 1) % 50 == 0:
+                        n_fds = open_fd_count()
+                        if n_fds >= 0:
+                            print(f"  [diag] open file descriptors after run {run_idx:03d}: {n_fds}")
 
                 if row is not None:
                     with open(csv_path, "a", newline="") as f:

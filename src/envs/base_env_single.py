@@ -158,7 +158,22 @@ class Env_N(gym.Env, metaclass=ABCMeta):
         """Restart simulation logic (Kept identical to original)."""
         self.k.close()
         if self.simulator == 'traci':
-            self.k.simulation.sumo_proc.kill()
+            if hasattr(self.k, 'simulation') and self.k.simulation is not None:
+                sim = self.k.simulation
+                if hasattr(sim, 'sumo_proc') and sim.sumo_proc is not None:
+                    proc = sim.sumo_proc
+                    for stream in (proc.stdin, proc.stdout, proc.stderr):
+                        if stream is not None:
+                            try:
+                                stream.close()
+                            except Exception:
+                                pass
+                    try:
+                        proc.kill()
+                        proc.wait(timeout=0.5)
+                    except Exception:
+                        pass
+                    sim.sumo_proc = None
 
         if render is not None:
             self.sim_params.render = render
@@ -643,12 +658,62 @@ class Env_N(gym.Env, metaclass=ABCMeta):
     def additional_command(self):
         pass
     
-    def terminate(self):
+    def close(self):
+        """Close environment and release all TraCI and SUMO resources."""
+        self.terminate()
+
+    def __del__(self):
         try:
-            self.k.close()
-            if self.sim_params.render in ['gray', 'dgray', 'rgb', 'drgb']:
-                self.renderer.close()
-        except:
+            self.terminate()
+        except Exception:
+            pass
+
+    def terminate(self):
+        """Clean teardown: release atexit reference, close TraCI, kill SUMO, and close streams."""
+        try:
+            import atexit
+            try:
+                atexit.unregister(self.terminate)
+            except Exception:
+                pass
+
+            if hasattr(self, 'k') and self.k is not None:
+                try:
+                    self.k.close()
+                except Exception:
+                    pass
+                if hasattr(self, 'simulator') and self.simulator == 'traci':
+                    if hasattr(self.k, 'simulation') and self.k.simulation is not None:
+                        sim = self.k.simulation
+                        if hasattr(sim, 'sumo_proc') and sim.sumo_proc is not None:
+                            proc = sim.sumo_proc
+                            for stream in (proc.stdin, proc.stdout, proc.stderr):
+                                if stream is not None:
+                                    try:
+                                        stream.close()
+                                    except Exception:
+                                        pass
+                            try:
+                                proc.kill()
+                                proc.wait(timeout=0.5)
+                            except Exception:
+                                pass
+                            sim.sumo_proc = None
+                        if hasattr(sim, 'kernel_api') and sim.kernel_api is not None:
+                            try:
+                                sim.kernel_api.close()
+                            except Exception:
+                                pass
+                            sim.kernel_api = None
+                self.k = None
+
+            if hasattr(self, 'sim_params') and getattr(self.sim_params, 'render', None) in ['gray', 'dgray', 'rgb', 'drgb']:
+                if hasattr(self, 'renderer') and self.renderer is not None:
+                    try:
+                        self.renderer.close()
+                    except Exception:
+                        pass
+        except Exception:
             pass
     def render(self, reset=False, buffer_length=5):
         """Render a frame.
