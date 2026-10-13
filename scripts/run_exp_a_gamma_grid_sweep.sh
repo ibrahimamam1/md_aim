@@ -17,7 +17,7 @@
 #
 # For each arm:
 #   1. Trains MOSDPPO (mode=exp_a) with (gamma_0, gamma_s_danger), fixed seed.
-#   2. Evaluates the checkpoint across scenarios (default: S1..S4).
+#   2. Evaluates the checkpoint across scenarios (default: S1..S5).
 #   3. Writes output/eval_exp_a_g0_<g0>_g_s_danger_<gsd>/evaluation_summary.json
 #
 # Usage:
@@ -46,7 +46,7 @@ GAMMA_0S=${GAMMA_0S:-"0.90 0.95 0.99"}
 DANGER_GAMMAS=${DANGER_GAMMAS:-"0.0 0.50 0.80"}
 TIMESTEPS=${TIMESTEPS:-800000}
 N_SIMS=${N_SIMS:-200}
-SCENARIOS=${SCENARIOS:-"S1 S2 S3 S4"}
+SCENARIOS=${SCENARIOS:-"S1 S2 S3 S4 S5"}
 SEED=${SEED:-42}
 NUM_WORKERS=${NUM_WORKERS:-24}
 LEARNING_RATE=${LEARNING_RATE:-3e-4}

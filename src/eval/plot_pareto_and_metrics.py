@@ -137,8 +137,8 @@ def generate_dummy_data() -> Dict[str, Any]:
         ],
     }
 
-    # Scenario S1..S4 breakdown for the primary methods
-    scenarios = ["S1\nFree", "S2\nMod", "S3\nDense", "S4\nSudden"]
+    # Scenario S1..S5 breakdown for the primary methods
+    scenarios = ["S1\nAll Low", "S2\nMix ML", "S3\nAll Med", "S4\nMix MH", "S5\nAll High"]
     scen_data = {
         scen: {
             "Baseline":  {"col": 0.12, "tt": 19.5, "gap": 0.55, "jerk": 1.15},
@@ -150,10 +150,10 @@ def generate_dummy_data() -> Dict[str, Any]:
         for scen in scenarios
     }
     # Induce characteristic scenario stress
-    scen_data["S3\nDense"]["Baseline"]["col"] = 0.24
-    scen_data["S3\nDense"]["Exp B (Core)"]["col"] = 0.08
-    scen_data["S4\nSudden"]["Baseline"]["col"] = 0.32
-    scen_data["S4\nSudden"]["Exp B (Core)"]["col"] = 0.07
+    scen_data["S4\nMix MH"]["Baseline"]["col"] = 0.24
+    scen_data["S4\nMix MH"]["Exp B (Core)"]["col"] = 0.08
+    scen_data["S5\nAll High"]["Baseline"]["col"] = 0.32
+    scen_data["S5\nAll High"]["Exp B (Core)"]["col"] = 0.07
 
     return {"tradeoff": data, "scenario_data": scen_data, "scenarios": scenarios}
 
@@ -206,7 +206,7 @@ def plot_pareto_frontiers(tradeoff_data: Dict[str, List[Dict]], save_path: str):
 
 def plot_scenario_benchmarks(scen_data: Dict[str, Dict], scenarios: List[str], save_path: str):
     """
-    Plots a 4-panel dashboard comparing methods across scenarios S1..S4.
+    Plots a 4-panel dashboard comparing methods across scenarios S1..S5.
     """
     fig, axes = plt.subplots(2, 2, figsize=(14, 9))
 
@@ -261,7 +261,7 @@ def plot_scenario_benchmarks(scen_data: Dict[str, Dict], scenarios: List[str], s
     ax.set_ylabel("Jerk (m/s³)")
     ax.grid(True, axis="y")
 
-    plt.suptitle("Performance Breakdown Across S1–S4 Traffic Regimes", fontsize=15, fontweight="bold", y=0.99)
+    plt.suptitle("Performance Breakdown Across S1–S5 Traffic Regimes", fontsize=15, fontweight="bold", y=0.99)
     plt.tight_layout()
     plt.savefig(save_path, dpi=300)
     plt.close()

@@ -1,7 +1,7 @@
 """Plot the collision-rate vs traversal-time Pareto front for the baseline gamma sweep.
 
 Reads every output/**/evaluation_summary.json, averages the metrics across scenarios
-(S1-S4) to get one point per run, and highlights the Pareto front (lower collision
+(S1-S5) to get one point per run, and highlights the Pareto front (lower collision
 rate and lower traversal time is better).
 
 Point classes:
@@ -137,7 +137,7 @@ def main():
 
     ax.set_xlabel("Collision rate")
     ax.set_ylabel("Traversal time (s)")
-    ax.set_title("Collision rate vs traversal time (averaged over scenarios S1-S4)\n"
+    ax.set_title("Collision rate vs traversal time (averaged over scenarios S1-S5)\n"
                  "baseline gamma sweep, experiments, best exp B gamma_min arm")
     ax.grid(True, alpha=0.3)
     ax.legend(fontsize=8)

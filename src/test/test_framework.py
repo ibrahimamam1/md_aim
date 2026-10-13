@@ -146,14 +146,37 @@ class TestMultiObjectiveStateDependentFramework(unittest.TestCase):
         self.assertAlmostEqual(buf.advantages_per_head[5, 0, 1], delta_expected_0, places=4)
 
     def test_scenarios_definitions(self):
-        """Verify that all 7 scenarios S1..S7 instantiate valid configs."""
-        for s_id in ["S1", "S2", "S3", "S4", "S5", "S6", "S7"]:
+        """Verify that all 5 scenarios S1..S5 instantiate valid configs and traffic rates."""
+        for s_id in ["S1", "S2", "S3", "S4", "S5"]:
             scen_def = get_scenario_definition(s_id, self.root_dir)
             self.assertEqual(scen_def["scenario_id"], s_id)
             self.assertIn("description", scen_def)
             self.assertIsNotNone(scen_def["net_params"])
             self.assertIsNotNone(scen_def["vehicles"])
             self.assertTrue(os.path.exists(scen_def["net_file"]), f"Net file missing: {scen_def['net_file']}")
+
+            rates = scen_def["traffic_rates"]
+            self.assertEqual(rates["W"], 0)
+            non_west_vals = sorted([rates["N"], rates["S"], rates["E"]])
+            if s_id == "S1":
+                self.assertEqual(non_west_vals, [150, 150, 150])
+            elif s_id == "S2":
+                self.assertEqual(non_west_vals, [150, 275, 275])
+            elif s_id == "S3":
+                self.assertEqual(non_west_vals, [275, 275, 275])
+            elif s_id == "S4":
+                self.assertEqual(non_west_vals, [275, 275, 400])
+            elif s_id == "S5":
+                self.assertEqual(non_west_vals, [400, 400, 400])
+
+            # Ensure West edge (E#L-X) only has RL inflow and no NonRL background inflow
+            flows = scen_def["net_params"].inflows.get()
+            west_flows = [f for f in flows if f["edge"] == "E#L-X"]
+            self.assertEqual(len(west_flows), 1)
+            self.assertEqual(west_flows[0]["vtype"], "RL")
+
+        with self.assertRaises(ValueError):
+            get_scenario_definition("S6", self.root_dir)
 
     def test_progress_tracking_and_terminal_goal(self):
         """Verify monotonic progress accumulation, terminal departure handling, and lack of spikes."""

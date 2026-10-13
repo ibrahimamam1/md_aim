@@ -5,7 +5,7 @@
 #
 # For each gamma in {0.90, 0.925, 0.95, 0.975, 0.99, 0.999}:
 #   1. Train the baseline (single critic, fixed discount, mode=baseline).
-#   2. Evaluate the final checkpoint on S1..S4 with n_sims sims per scenario,
+#   2. Evaluate the final checkpoint on S1..S5 with n_sims sims per scenario,
 #      writing results into a DEDICATED folder per gamma:
 #        output/eval_baseline_g0_<gamma>/
 #
@@ -16,7 +16,7 @@
 #
 # Notes:
 #   - Fixed seed across arms so only the discount factor varies.
-#   - Episode recording during eval is OFF by default (200 sims x 4 scenarios
+#   - Episode recording during eval is OFF by default (200 sims x 5 scenarios
 #     per arm produces a lot of JSON); enable with RECORD_EPISODES=1.
 # ==============================================================================
 set -e
@@ -38,7 +38,7 @@ fi
 GAMMAS=${GAMMAS:-"0.90 0.925 0.95 0.975 0.99 0.999"}
 TIMESTEPS=${TIMESTEPS:-800000}
 N_SIMS=${N_SIMS:-200}
-SCENARIOS=${SCENARIOS:-"S1 S2 S3 S4"}
+SCENARIOS=${SCENARIOS:-"S1 S2 S3 S4 S5"}
 SEED=${SEED:-42}
 NUM_WORKERS=${NUM_WORKERS:-24}
 LEARNING_RATE=${LEARNING_RATE:-3e-4}

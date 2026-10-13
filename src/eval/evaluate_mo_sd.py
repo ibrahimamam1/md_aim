@@ -4,7 +4,7 @@ evaluate_mo_sd.py
 Comprehensive evaluation pipeline for Multi-Objective, State-Dependent RL agents.
 
 Evaluates trained policies across:
-  - Scenarios S1 to S4 (free flow, moderate, dense, sudden conflict)
+  - Scenarios S1 to S5 (All Low, Mixed Medium-Low, All Medium, Mixed Medium-High, All High)
   - Multi-objective Pareto weight sweep (w_l, w_s)
   - Comprehensive Section 15 evaluation metrics:
       Safety: collision rate, near-collision rate, min TTC, min safe gap, emergency braking frequency, unsafe interactions
@@ -44,8 +44,8 @@ CSV_HEADER = [
 def parse_args():
     parser = argparse.ArgumentParser(description="Evaluate MOSDPPO policies across scenarios.")
     parser.add_argument("--checkpoint", type=str, required=True, help="Path to checkpoint zip file.")
-    parser.add_argument("--scenarios", nargs="+", default=["S1", "S2", "S3", "S4"],
-                        help="List of scenarios to evaluate (S1..S4).")
+    parser.add_argument("--scenarios", nargs="+", default=["S1", "S2", "S3", "S4", "S5"],
+                        help="List of scenarios to evaluate (S1..S5).")
     parser.add_argument("--n_sims", type=int, default=20, help="Number of simulation runs per scenario.")
     parser.add_argument("--weights_l", nargs="+", type=float, default=[0.5],
                         help="List of efficiency weights w_l to test.")

@@ -18,7 +18,7 @@
 #
 # For each value of gamma_s_danger:
 #   1. Trains MOSDPPO in the specified mode (default: exp_b).
-#   2. Evaluates the resulting checkpoint across scenarios (default: S1..S4).
+#   2. Evaluates the resulting checkpoint across scenarios (default: S1..S5).
 #   3. Generates evaluation_summary.json and logs per arm.
 #
 # Usage:
@@ -49,7 +49,7 @@ GAMMA_0=${GAMMA_0:-"0.99"}
 DANGER_GAMMAS=${DANGER_GAMMAS:-"0.0 0.50 0.70 0.80 0.85"}
 TIMESTEPS=${TIMESTEPS:-800000}
 N_SIMS=${N_SIMS:-200}
-SCENARIOS=${SCENARIOS:-"S1 S2 S3 S4"}
+SCENARIOS=${SCENARIOS:-"S1 S2 S3 S4 S5"}
 SEED=${SEED:-42}
 NUM_WORKERS=${NUM_WORKERS:-24}
 LEARNING_RATE=${LEARNING_RATE:-3e-4}

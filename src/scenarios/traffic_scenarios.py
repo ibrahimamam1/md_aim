@@ -1,21 +1,20 @@
 """
 traffic_scenarios.py
 ────────────────────
-Comprehensive suite of 7 evaluation scenarios from Section 14:
+Suite of 5 evaluation traffic scenarios:
 
-  S1 — Free flow: Low traffic density (100–150 veh/h), wide gaps.
-  S2 — Moderate traffic: Balanced medium inflow (275 veh/h), normal IDM interaction.
-  S3 — Dense traffic: High volume (400–500 veh/h), tight gaps, heavy contention.
-  S4 — Sudden conflict: High-speed cross-traffic entering directly into conflict path.
-  S5 — Aggressive/unpredictable vehicle: Non-RL vehicles with aggressive IDM parameters
-       (short headway τ=0.4 s, min_gap=1.0 m, speed_factor=1.3, abrupt accel/decel).
-  S6 — Late-observed conflict: Restricted perception radius (25 m) simulating visual
-       occlusion/blind corners where conflicts appear with short warning.
-  S7 — Distribution shift: Evaluated on unseen junction geometry
-       (100m_allway_stop_fcfs_junction.net.xml) and asymmetric traffic distribution.
+  S1 — All Low:           All non-West edges (N, S, E) at low inflow (150 veh/h).
+  S2 — Mixed Medium-Low:  Two random non-West edges at medium (275 veh/h) and the other at low (150 veh/h).
+  S3 — All Medium:        All non-West edges (N, S, E) at medium inflow (275 veh/h).
+  S4 — Mixed Medium-High: Two random non-West edges at medium (275 veh/h) and the other at high (400 veh/h).
+  S5 — All High:          All non-West edges (N, S, E) at high inflow (400 veh/h).
+
+Note: The West edge (E#L-X) where the ego vehicle spawns has no background (NonRL)
+inflow by design; only the RL agent spawns there.
 """
 
 import os
+import random
 import sys
 from copy import deepcopy
 from typing import Any, Dict, List, Optional, Tuple
@@ -30,6 +29,11 @@ from flow.core.params import (
     EnvParams, SumoParams, SumoCarFollowingParams, InFlows,
 )
 from flow.controllers import RLController, IDMController
+
+LOW_RATE = 150
+MEDIUM_RATE = 275
+HIGH_RATE = 400
+NON_WEST_EDGES = ("N", "S", "E")
 
 
 def build_inflows(traffic_rate: Dict[str, float], rl_prob: float = 0.8, warmup_steps: int = 50) -> InFlows:
@@ -56,7 +60,7 @@ def build_inflows(traffic_rate: Dict[str, float], rl_prob: float = 0.8, warmup_s
 
 def get_scenario_definition(scenario_id: str, root_dir: str) -> Dict[str, Any]:
     """
-    Returns the complete parameter configuration for a specified scenario S1..S7.
+    Returns the complete parameter configuration for a specified scenario S1..S5.
     """
     scen = scenario_id.upper()
     net_dir = os.path.join(root_dir, "networks")
@@ -85,53 +89,42 @@ def get_scenario_definition(scenario_id: str, root_dir: str) -> Dict[str, Any]:
     non_rl_impatience = 0.0
 
     if scen == "S1":
-        # Free flow
-        traffic_rates = {"N": 120, "S": 120, "W": 0, "E": 120}
-        desc = "S1 — Free flow (low density, large separation gaps)"
+        # 1 - All low
+        traffic_rates = {"N": LOW_RATE, "S": LOW_RATE, "W": 0, "E": LOW_RATE}
+        desc = f"S1 — All Low ({LOW_RATE} veh/h on N, S, E)"
 
     elif scen == "S2":
-        # Moderate traffic
-        traffic_rates = {"N": 275, "S": 275, "W": 0, "E": 275}
-        desc = "S2 — Moderate traffic (nominal interaction)"
+        # 2 - Mixed Medium Low: Two random edges are medium and the other is low
+        low_edge = random.choice(NON_WEST_EDGES)
+        traffic_rates = {
+            edge: (LOW_RATE if edge == low_edge else MEDIUM_RATE)
+            for edge in NON_WEST_EDGES
+        }
+        traffic_rates["W"] = 0
+        desc = f"S2 — Mixed Medium-Low (two random edges {MEDIUM_RATE} veh/h, one {LOW_RATE} veh/h)"
 
     elif scen == "S3":
-        # Dense traffic
-        traffic_rates = {"N": 450, "S": 450, "W": 0, "E": 450}
-        desc = "S3 — Dense traffic (high volume, multiple interacting vehicles, tight gaps)"
+        # 3 - All medium
+        traffic_rates = {"N": MEDIUM_RATE, "S": MEDIUM_RATE, "W": 0, "E": MEDIUM_RATE}
+        desc = f"S3 — All Medium ({MEDIUM_RATE} veh/h on N, S, E)"
 
     elif scen == "S4":
-        # Sudden conflict: heavy crossing flow from South and North
-        traffic_rates = {"N": 500, "S": 500, "W": 0, "E": 200}
-        non_rl_speed_factor = 1.25
-        desc = "S4 — Sudden conflict (rapid cross-traffic entering vehicle trajectory)"
+        # 4 - Mixed Medium High: Two random edges are medium and the other is high
+        high_edge = random.choice(NON_WEST_EDGES)
+        traffic_rates = {
+            edge: (HIGH_RATE if edge == high_edge else MEDIUM_RATE)
+            for edge in NON_WEST_EDGES
+        }
+        traffic_rates["W"] = 0
+        desc = f"S4 — Mixed Medium-High (two random edges {MEDIUM_RATE} veh/h, one {HIGH_RATE} veh/h)"
 
     elif scen == "S5":
-        # Aggressive/unpredictable traffic
-        traffic_rates = {"N": 350, "S": 350, "W": 0, "E": 350}
-        non_rl_min_gap = 1.0
-        non_rl_tau = 0.4
-        non_rl_accel = 4.0
-        non_rl_decel = 6.0
-        non_rl_speed_factor = 1.3
-        non_rl_speed_dev = 0.3
-        non_rl_impatience = 0.8
-        desc = "S5 — Aggressive/unpredictable vehicle (short headway, abrupt maneuvers)"
-
-    elif scen == "S6":
-        # Late-observed conflict (occlusion/restricted sensor range)
-        traffic_rates = {"N": 350, "S": 350, "W": 0, "E": 350}
-        perception_radius_override = 25.0   # restricted to 25m
-        desc = "S6 — Late-observed conflict (occluded view, 25m detection range)"
-
-    elif scen == "S7":
-        # Distribution shift: all-way stop junction geometry and uniform random traffic
-        net_file = os.path.join(net_dir, "100m_allway_stop_fcfs_junction.net.xml")
-        net_class = UniformRandomNetwork
-        traffic_rates = {"N": 300, "S": 300, "W": 0, "E": 300}
-        desc = "S7 — Distribution shift (unseen junction geometry & priority rules)"
+        # 5 - All High
+        traffic_rates = {"N": HIGH_RATE, "S": HIGH_RATE, "W": 0, "E": HIGH_RATE}
+        desc = f"S5 — All High ({HIGH_RATE} veh/h on N, S, E)"
 
     else:
-        raise ValueError(f"Unknown scenario ID: {scenario_id}. Choose S1..S7.")
+        raise ValueError(f"Unknown scenario ID: {scenario_id}. Choose S1..S5.")
 
     inflows = build_inflows(traffic_rates, rl_prob=0.8, warmup_steps=warmup_steps)
 
@@ -230,6 +223,7 @@ def get_scenario_definition(scenario_id: str, root_dir: str) -> Dict[str, Any]:
     return {
         "scenario_id": scen,
         "description": desc,
+        "traffic_rates": traffic_rates,
         "net_file": net_file,
         "net_class": net_class,
         "vehicles": vehicles,
