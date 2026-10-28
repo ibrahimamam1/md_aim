@@ -60,7 +60,8 @@ class Env_N(gym.Env, metaclass=ABCMeta):
                  network=None,
                  simulator='traci',
                  scenario=None,
-                 render_mode=None
+                 render_mode=None,
+                 seed=None,
                  ):
         
         self.agent_id = None 
@@ -71,6 +72,9 @@ class Env_N(gym.Env, metaclass=ABCMeta):
         self.net_params = self.network.net_params
         self.initial_config = self.network.initial_config
         self.sim_params = deepcopy(sim_params)
+        self._explicit_seed = int(seed) if seed is not None else None
+        if self._explicit_seed is not None:
+            self.sim_params.seed = self._explicit_seed
         
         # Rendering setup
         self.should_render = self.sim_params.render
@@ -416,6 +420,13 @@ class Env_N(gym.Env, metaclass=ABCMeta):
             self.k.vehicle.apply_lane_change(
                 self.k.vehicle.get_controlled_lc_ids(), direction=direction)
 
+    def seed(self, seed=None):
+        """Seed the environment and traffic simulator."""
+        if seed is not None:
+            self._explicit_seed = int(seed)
+            self.sim_params.seed = self._explicit_seed
+        return [self.sim_params.seed]
+
     def reset(self, *, seed=None, options=None):
         """
         Reset the environment with a spawn safety valve.
@@ -449,7 +460,9 @@ class Env_N(gym.Env, metaclass=ABCMeta):
             self.step_counter = 0
             # Handle seeding for deterministic behavior if needed
             if seed is not None:
-                self.sim_params.seed = seed
+                self.sim_params.seed = int(seed)
+            elif getattr(self, "_explicit_seed", None) is not None:
+                self.sim_params.seed = self._explicit_seed
             else:
                 self.sim_params.seed = random.randint(0, 100000)
             

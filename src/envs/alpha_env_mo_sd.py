@@ -85,6 +85,7 @@ class AlphaEnv_MO_SD(Env_N):
         d_eta_reward_window=2.0,
         d_eta_reward_decay=0.5,
         d_eta_reward_gain=1.0,
+        seed=None,
     ):
         self.prev_pos = dict()
         self.absolute_position = dict()
@@ -99,7 +100,7 @@ class AlphaEnv_MO_SD(Env_N):
         self.routes = dict()
         self.last_progress = 0.0
 
-        super().__init__(env_params, sim_params, network, simulator=simulator)
+        super().__init__(env_params, sim_params, network, simulator=simulator, seed=seed)
 
         # Static conflict map
         self.conflict_map = self._build_conflict_map()

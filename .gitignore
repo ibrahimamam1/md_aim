@@ -8,3 +8,15 @@ checkpoints/
 tensorboard_logs/
 wandb/
 .freebuff/
+
+# Paper writing and LaTeX build artifacts
+paper/
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.synctex.gz
+*.toc

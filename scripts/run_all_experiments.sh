@@ -73,6 +73,7 @@ run_pipeline() {
             --checkpoint "${LATEST_DIR}/final_model.zip" \
             --scenarios S1 S2 S3 S4 S5 \
             --n_sims 15 \
+            --seed 42 \
             --output_dir "output/eval_${mode}_${tag}"
     fi
 }

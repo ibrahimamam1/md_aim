@@ -109,6 +109,7 @@ for g0 in ${GAMMA_0S}; do
             --checkpoint "${CKPT_DIR}/final_model.zip" \
             --scenarios ${SCENARIOS} \
             --n_sims "${N_SIMS}" \
+            --seed "${SEED}" \
             --output_dir "${EVAL_DIR}" \
             ${RECORD_FLAG}
     done

@@ -39,7 +39,7 @@ except Exception:
     pass
 
 CSV_HEADER = [
-    "run", "scenario", "weight_l", "weight_s", "collision", "success",
+    "run", "scenario", "seed", "weight_l", "weight_s", "collision", "success",
     "avg_speed", "min_safe_gap", "min_ttc", "emergency_braking_count", "near_collision_count",
     "traversal_time", "waiting_time", "stops_count", "max_deceleration", "mean_abs_jerk", "jerk_variance",
     "progress_reward", "goal_reward", "time_penalty", "gap_penalty", "collision_penalty",
@@ -54,6 +54,8 @@ def parse_args():
     parser.add_argument("--scenarios", nargs="+", default=["S1", "S2", "S3", "S4", "S5"],
                         help="List of scenarios to evaluate (S1..S5).")
     parser.add_argument("--n_sims", type=int, default=20, help="Number of simulation runs per scenario.")
+    parser.add_argument("--seed", type=int, default=42,
+                        help="Random seed for traffic simulation and evaluation (default: 42).")
     parser.add_argument("--weights_l", nargs="+", type=float, default=[0.5],
                         help="List of efficiency weights w_l to test.")
     parser.add_argument("--render", action="store_true", default=False, help="Render SUMO simulation.")
@@ -107,8 +109,18 @@ def evaluate():
     print(f" Checkpoint : {checkpoint_path}")
     print(f" Scenarios  : {args.scenarios}")
     print(f" Runs/scen  : {args.n_sims}")
+    print(f" Seed       : {args.seed}")
     print(f" Output dir : {out_dir}")
     print("=" * 76 + "\n")
+
+    # Seed python / numpy / torch so evaluation is reproducible
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    try:
+        from stable_baselines3.common.utils import set_random_seed
+        set_random_seed(args.seed)
+    except Exception:
+        pass
 
     # Load model once
     print("Loading MOSDPPO model...")
@@ -131,17 +143,19 @@ def evaluate():
             w_s = max(0.0, 1.0 - w_l)
 
             for run_idx in range(args.n_sims):
+                run_seed = args.seed + run_idx
                 env = None
                 row = None
                 try:
                     # Create isolated scenario environment
                     env = DummyVecEnv([
-                        lambda: create_scenario_env(
+                        lambda s=run_seed: create_scenario_env(
                             scenario_id=scen_id,
                             root_dir=root_dir,
                             render=args.render,
                             weight_l=w_l,
                             weight_s=w_s,
+                            seed=s,
                         )
                     ])
 
@@ -153,6 +167,7 @@ def evaluate():
                             recording_dir=recording_dir,
                             metadata={"checkpoint": os.path.basename(checkpoint_path),
                                       "weight_l": w_l, "weight_s": w_s,
+                                      "seed": run_seed,
                                       "mode": "deterministic"},
                         )
                         recorder.record_reset()
@@ -178,6 +193,7 @@ def evaluate():
                     row = {
                         "run": run_idx,
                         "scenario": scen_id,
+                        "seed": run_seed,
                         "weight_l": f"{w_l:.2f}",
                         "weight_s": f"{w_s:.2f}",
                         "collision": int(mo_telemetry.get("collision", 0)),
@@ -219,7 +235,7 @@ def evaluate():
                                 collision, success, timeout = recorder.outcome()
                                 update_manifest(recording_dir, scen_id, {
                                     "file": os.path.relpath(saved_path, recording_dir),
-                                    "run": run_idx, "collision": collision,
+                                    "run": run_idx, "seed": run_seed, "collision": collision,
                                     "success": success, "timeout": timeout,
                                 })
                         except Exception as rec_err:
@@ -273,6 +289,7 @@ def evaluate():
         # Compute scenario aggregates
         if scenario_runs:
             summary = {
+                "seed": args.seed,
                 "collision_rate": float(np.mean([r["collision"] for r in scenario_runs])),
                 "success_rate": float(np.mean([r["success"] for r in scenario_runs])),
                 "average_speed": float(np.mean([r["avg_speed"] for r in scenario_runs])),

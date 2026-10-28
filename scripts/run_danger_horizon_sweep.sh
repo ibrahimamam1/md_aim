@@ -107,6 +107,7 @@ for gsd in ${DANGER_GAMMAS}; do
         --checkpoint "${CKPT_DIR}/final_model.zip" \
         --scenarios ${SCENARIOS} \
         --n_sims "${N_SIMS}" \
+        --seed "${SEED}" \
         --output_dir "${EVAL_DIR}" \
         ${RECORD_FLAG}
 done

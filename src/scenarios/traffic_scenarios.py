@@ -242,6 +242,7 @@ def create_scenario_env(
     mode: str = "multi_objective",
     weight_l: float = 0.5,
     weight_s: float = 0.5,
+    seed: Optional[int] = None,
     **env_kwargs,
 ):
     """
@@ -252,6 +253,8 @@ def create_scenario_env(
     scen_def = get_scenario_definition(scenario_id, root_dir)
     sim_params = deepcopy(scen_def["sim_params"])
     sim_params.render = render
+    if seed is not None:
+        sim_params.seed = int(seed)
 
     net = scen_def["net_class"](
         name=f"Scenario_{scenario_id}",
@@ -270,6 +273,7 @@ def create_scenario_env(
         weight_l=weight_l,
         weight_s=weight_s,
         perception_radius_override=scen_def["perception_radius_override"],
+        seed=seed,
         **env_kwargs,
     )
     return env
