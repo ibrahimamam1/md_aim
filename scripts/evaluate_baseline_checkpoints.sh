@@ -205,7 +205,7 @@ done
 echo "========================================================================"
 
 # Optionally update Pareto front plot if script exists
-if [ -f "scripts/plot_pareto_front.py" ]; then
+if [ "${DRY_RUN}" != "1" ] && [ -f "scripts/plot_pareto_front.py" ]; then
     echo ""
     echo ">>> Updating Pareto front plot via scripts/plot_pareto_front.py..."
     "$PYTHON_CMD" scripts/plot_pareto_front.py || true
